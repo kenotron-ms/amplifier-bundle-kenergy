@@ -1,0 +1,39 @@
+bundle:
+  name: kenergy-behavior
+  version: 1.0.0
+  description: Wires kenergy modes, skills, and philosophy context
+
+hooks:
+  - module: hooks-mode
+    config:
+      search_paths:
+        - "@kenergy:modes"
+
+tools:
+  - module: tool-skills
+    config:
+      skills:
+        - "@kenergy:skills"
+
+context:
+  include:
+    # Core mandate: check skills and modes BEFORE any response
+    - kenergy:context/instructions.md
+
+    # Foundational philosophy: VDD, TDD, systematic over ad-hoc
+    - kenergy:context/philosophy.md
+
+    # Amplifier-specific meta-instructions and red-flag table
+    - kenergy:context/using-superpowers-amplifier.md
+
+    # YAGNI enforcement, anti-rationalization, false completion prevention
+    - kenergy:context/shared-anti-rationalization.md
+
+    # Cautionary failure vignettes — patterns that lead to false completions
+    - kenergy:context/verification-failure-memories.md
+
+    # The remaining context files (spec-document-review-prompt.md,
+    # debugging-techniques.md, tdd-depth.md, visual-companion-guide.md)
+    # are available in kenergy:context/ for modes and agents to @mention
+    # but are NOT loaded on every turn. This preserves token budget.
+    # To always load them, add them to your own ~/.amplifier/context/.
