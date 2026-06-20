@@ -34,13 +34,15 @@ For each task in the plan: implementer → verifier → code-quality-reviewer. T
 /execute-plan  →  All tasks implemented, verified, committed
 ```
 
-### Four Persona Reviewer Skills
+### Five Persona Reviewer Skills
 
 Load at any checkpoint — brainstorm, design, plan, implement, or review.
 
 **`crusty-old-engineer`** (`COE`) — Grounded engineering skeptic. Asks: "What have you tried and what could go wrong?" Evidence-linked judgment anchored in real incident post-mortems (Knight Capital, Therac-25, Ariane 5). Triggers on `coe`, `reality check`, `what could go wrong`.
 
 **`cranky-old-sam`** (`COSam`) — Simplicity zealot. First question is always "why does this exist at all?" not "what's missing?" Treats every unnecessary abstraction as a personal affront. Triggers on `cosam`, `simplify`, `too complex`, `do we need this`.
+
+**`kenergy`** — Verification anchor. Two modes: (1) pre-work — define what "working" means for a real user and set the minimum proof before delegating; (2) post-work — hold the claim of done to that bar. Asks: "does this earn its place, and have you actually proven it?" Triggers on `kenergy`, `prove it`, `define done`, `did you verify`, `minimum proof`.
 
 **`scenario-verification`** — Goal-language UI verification scenarios. Write verification as user intent + observable outcome — never DOM selectors, never CSS classes. Scenarios survive a full UI redesign without edits. Triggers on `verify the feature`, `scenario test`.
 

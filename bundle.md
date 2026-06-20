@@ -28,12 +28,13 @@ Opinionated development workflow for people who believe that:
 | `/write-plan` | Review design → discuss task breakdown → delegate plan creation to an agent |
 | `/execute-plan` | Three-agent pipeline: implementer → verifier → code-quality-reviewer |
 
-**Four persona reviewer skills** you can load at any checkpoint:
+**Five persona reviewer skills** you can load at any checkpoint:
 
 | Skill | Persona | Load trigger |
 |-------|---------|-------------|
 | `crusty-old-engineer` | Grounded skeptic. "What have you tried and what could go wrong?" | `coe`, `reality check` |
 | `cranky-old-sam` | Simplicity zealot. "Why does this exist at all?" | `cosam`, `simplify` |
+| `kenergy` | Verification anchor. "Does this earn its place — and have you proven it works?" | `kenergy`, `prove it`, `define done` |
 | `scenario-verification` | Goal-language UI verification. No DOM selectors. | `verify the feature` |
 | `voice-check` | Anti-slop blog post judge. Requires per-project `VOICE.md`. | `/voice-check` |
 
