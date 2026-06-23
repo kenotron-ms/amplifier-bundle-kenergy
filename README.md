@@ -14,24 +14,24 @@ amplifier bundle add git+https://github.com/kenotron-ms/amplifier-bundle-kenergy
 
 The modes form a complete development loop. Use them in order.
 
-**`/brainstorm`** — Design before code.
+**`/think-like-ken`** — Design before code.
 
 Explore requirements through dialogue (one question at a time), propose 2–3 approaches with trade-offs, validate the design section-by-section before writing a word of code. Delegates document creation to `superpowers:brainstormer` — the orchestrator converses, the agent writes the artifact.
 
-**`/write-plan`** — Plan before implementation.
+**`/plan-like-ken`** — Plan before implementation.
 
 Review the design doc, map dependencies, decide the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation to `behavioral-anchor:agents/builder`.
 
-**`/execute-plan`** — Three-agent execution with real verification.
+**`/build-like-ken`** — Three-agent execution with real verification.
 
 For each task in the plan: implementer → verifier → code-quality-reviewer. The orchestrator never writes code. Real execution output is required. Mocks-only = not verified.
 
 ```
-/brainstorm  →  Design saved to docs/plans/
+/think-like-ken  →  Design saved to docs/plans/
     ↓
-/write-plan  →  Plan saved to docs/plans/
+/plan-like-ken  →  Plan saved to docs/plans/
     ↓
-/execute-plan  →  All tasks implemented, verified, committed
+/build-like-ken  →  All tasks implemented, verified, committed
 ```
 
 ### Five Persona Reviewer Skills
@@ -62,7 +62,7 @@ Five short context files that enforce the shared discipline:
 
 Four heavier reference files live in `context/` but are **not** always loaded (to preserve token budget):
 
-- `spec-document-review-prompt.md` — antagonistic spec reviewer dispatch template (referenced by `/brainstorm`)
+- `spec-document-review-prompt.md` — antagonistic spec reviewer dispatch template (referenced by `/think-like-ken`)
 - `debugging-techniques.md` — root-cause tracing reference
 - `tdd-depth.md` — TDD iron law, anti-patterns, and extended rebuttals
 - `visual-companion-guide.md` — visual brainstorming companion guide
@@ -111,8 +111,8 @@ grep -ic "leverage\|utilize\|seamless\|robust" "$1"  # AI trigger words
 
 This bundle automatically installs:
 
-- **[amplifier-bundle-superpowers](https://github.com/microsoft/amplifier-bundle-superpowers)** — provides `superpowers:brainstormer` (used by `/brainstorm`)
-- **[behavioral-anchor](https://github.com/microsoft/amplifier-foundation/tree/main/experiments/behavioral-anchor)** — provides `behavioral-anchor:agents/builder` (used by `/write-plan` and `/execute-plan`)
+- **[amplifier-bundle-superpowers](https://github.com/microsoft/amplifier-bundle-superpowers)** — provides `superpowers:brainstormer` (used by `/think-like-ken`)
+- **[behavioral-anchor](https://github.com/microsoft/amplifier-foundation/tree/main/experiments/behavioral-anchor)** — provides `behavioral-anchor:agents/builder` (used by `/plan-like-ken` and `/build-like-ken`)
 
 ## Philosophy
 
@@ -147,7 +147,7 @@ This preserves real-time dialogue for what it's good at, and uses focused agents
 
 ### One Question at a Time
 
-`/brainstorm` enforces this hard. Ask one question. Wait for the answer. Ask the next question. A "questionnaire" approach produces half-answers to six questions instead of full answers to three.
+`/think-like-ken` enforces this hard. Ask one question. Wait for the answer. Ask the next question. A "questionnaire" approach produces half-answers to six questions instead of full answers to three.
 
 ## License
 

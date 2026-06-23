@@ -38,15 +38,15 @@ BEFORE EVERY RESPONSE:
 2. If a mode applies, tell the user which mode and why.
 3. If the user hasn't activated a mode and one clearly applies, say so.
 4. If there is even a 1% chance a mode applies, suggest it. Let the user decide.
-5. **When the user consents** (says "yes", "go ahead", "let's brainstorm", uses `/brainstorm`, `/debug`, etc.), **activate the mode immediately** using `mode(operation="set", name="<mode>")`. Do NOT just describe the mode conversationally — actually call the mode tool so its tool policies and guidance are enforced. A slash command like `/brainstorm` is implicit consent — activate immediately, no further confirmation needed.
+5. **When the user consents** (says "yes", "go ahead", "let's brainstorm", uses `/think-like-ken`, `/debug`, etc.), **activate the mode immediately** using `mode(operation="set", name="<mode>")`. Do NOT just describe the mode conversationally — actually call the mode tool so its tool policies and guidance are enforced. A slash command like `/think-like-ken` is implicit consent — activate immediately, no further confirmation needed.
 
 This is not optional. This is not a suggestion.
 
 | User Says | You Recommend | Why |
 |-----------|---------------|-----|
-| "Build X", "Add feature Y", new work | `/brainstorm` | Design before code |
-| Design exists, ready to plan | `/write-plan` | Plan before implementation |
-| Plan exists, ready to build | `/execute-plan` | Systematic execution |
+| "Build X", "Add feature Y", new work | `/think-like-ken` | Design before code |
+| Design exists, ready to plan | `/plan-like-ken` | Plan before implementation |
+| Plan exists, ready to build | `/build-like-ken` | Systematic execution |
 | Bug, error, unexpected behavior | `/debug` | Root cause before fixes |
 | "Is it done?", "Does it work?" | `/verify` | Evidence before claims |
 | Tests pass, ready to merge/PR | `/finish` | Clean completion |
@@ -76,10 +76,10 @@ For partial workflows, ad-hoc tasks, bug fixes, or one-off verification. You sug
 | Situation | Suggest |
 |-----------|---------|
 | "Build me a feature from scratch" | Recipe: `superpowers:recipes/superpowers-full-development-cycle.yaml` |
-| "I have a design, need a plan" | Mode: `/write-plan` |
+| "I have a design, need a plan" | Mode: `/plan-like-ken` |
 | "Fix this bug" | Mode: `/debug` |
 | "Is this ready to ship?" | Mode: `/verify` then `/finish` |
-| "Execute this plan" | Mode: `/execute-plan` or Recipe: `superpowers:recipes/subagent-driven-development.yaml` |
+| "Execute this plan" | Mode: `/build-like-ken` or Recipe: `superpowers:recipes/subagent-driven-development.yaml` |
 
 ---
 
@@ -89,14 +89,14 @@ Not every task needs the full pipeline. Match the approach to the task. This pre
 
 | Task Type | Recommended Approach |
 |-----------|----------------------|
-| New feature (multi-file) | Full cycle recipe OR `/brainstorm` -> `/write-plan` -> `/execute-plan` -> `/verify` -> `/finish` |
+| New feature (multi-file) | Full cycle recipe OR `/think-like-ken` -> `/plan-like-ken` -> `/build-like-ken` -> `/verify` -> `/finish` |
 | Bug fix | `/debug` -> `/verify` -> `/finish` |
 | Small change (< 20 lines) | Make the change, then `/verify` |
-| Refactoring | `/brainstorm` (if scope unclear) -> `/execute-plan` -> `/verify` -> `/finish` |
+| Refactoring | `/think-like-ken` (if scope unclear) -> `/build-like-ken` -> `/verify` -> `/finish` |
 | Documentation only | No mode needed |
 | Exploration / investigation | No mode needed |
 
-Don't suggest `/brainstorm` for a typo fix. Don't skip `/debug` for a real bug. Use judgment on scale, but when in doubt, suggest the mode.
+Don't suggest `/think-like-ken` for a typo fix. Don't skip `/debug` for a real bug. Use judgment on scale, but when in doubt, suggest the mode.
 
 **Bite-sized task granularity** — Each task in a plan should be 2-5 minutes:
 - "Write the failing test" — one step

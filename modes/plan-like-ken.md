@@ -1,8 +1,8 @@
 ---
 mode:
-  name: write-plan
+  name: plan-like-ken
   description: Create detailed implementation plans grounded in Verification Driven Development — fast static gates, real execution, human attention is sacred
-  shortcut: write-plan
+  shortcut: plan-like-ken
   
   tools:
     safe:
@@ -20,11 +20,11 @@ mode:
       - bash
   
   default_action: block
-  allowed_transitions: [execute-plan, brainstorm, debug]
+  allowed_transitions: [build-like-ken, think-like-ken, debug]
   allow_clear: false
 ---
 
-WRITE-PLAN MODE: You orchestrate plan creation. The agent writes the plan.
+PLAN-LIKE-KEN MODE: You orchestrate plan creation. The agent writes the plan.
 
 <CRITICAL>
 THE HYBRID PATTERN: You handle the CONVERSATION. Agents handle the ARTIFACTS.
@@ -179,7 +179,7 @@ git commit -m "feat: [what this does]"
 ```markdown
 # [Feature Name] Implementation Plan
 
-> **For execution:** Use `/execute-plan` mode.
+> **For execution:** Use `/build-like-ken` mode.
 
 **Goal:** [One sentence]
 
@@ -217,15 +217,15 @@ git commit -m "feat: [what this does]"
 ## Announcement
 
 When entering this mode, announce:
-"I'm entering write-plan mode. I'll review the design, discuss the task breakdown and verification approach with you, then delegate to a specialist agent to write the plan."
+"I'm entering plan-like-ken mode. I'll review the design, discuss the task breakdown and verification approach with you, then delegate to a specialist agent to write the plan."
 
 ## Transitions
 
 **Done when:** Plan saved to `docs/plans/`
 
-**Golden path:** `/execute-plan`
-- Use `mode(operation='set', name='execute-plan')` to transition.
+**Golden path:** `/build-like-ken`
+- Use `mode(operation='set', name='build-like-ken')` to transition.
 
 **Dynamic transitions:**
-- Design incomplete → `mode(operation='set', name='brainstorm')`
-- Plan reveals design issues → `mode(operation='set', name='brainstorm')`
+- Design incomplete → `mode(operation='set', name='think-like-ken')`
+- Plan reveals design issues → `mode(operation='set', name='think-like-ken')`

@@ -1,8 +1,8 @@
 ---
 mode:
-  name: brainstorm
+  name: think-like-ken
   description: Design refinement before any creative work - explore approaches and trade-offs through collaborative dialogue
-  shortcut: brainstorm
+  shortcut: think-like-ken
   
   tools:
     safe:
@@ -19,11 +19,11 @@ mode:
       - bash
   
   default_action: block
-  allowed_transitions: [write-plan, debug]
+  allowed_transitions: [plan-like-ken, debug]
   allow_clear: false
 ---
 
-BRAINSTORM MODE: You facilitate design refinement through collaborative dialogue.
+THINK-LIKE-KEN MODE: You facilitate design refinement through collaborative dialogue.
 
 <CRITICAL>
 THE HYBRID PATTERN: You handle the CONVERSATION. Agents handle the ARTIFACTS.
@@ -44,15 +44,15 @@ the user has approved each section. This applies to EVERY project regardless of
 perceived simplicity.
 </HARD-GATE>
 
-When entering brainstorm mode, create this todo checklist immediately:
+When entering think-like-ken mode, create this todo checklist immediately:
 - [ ] Explore project context
 - [ ] Ask clarifying questions (one at a time)
 - [ ] Propose 2-3 approaches with tradeoffs
 - [ ] Present design in sections (validate each)
 - [ ] Delegate document creation to brainstormer agent
 - [ ] Spec self-review (placeholder, consistency, scope, ambiguity)
-- [ ] User review gate (explicit approval before /write-plan)
-- [ ] Transition to /write-plan
+- [ ] User review gate (explicit approval before /plan-like-ken)
+- [ ] Transition to /plan-like-ken
 
 ## The Process
 
@@ -145,7 +145,7 @@ Here's a summary of what we designed:
 Does this match your vision? Any changes before we move to implementation planning?
 ```
 
-**Explicit wait:** Do NOT transition to /write-plan until the user gives explicit approval (e.g., "yes", "looks good", "proceed"). A non-answer is not approval.
+**Explicit wait:** Do NOT transition to /plan-like-ken until the user gives explicit approval (e.g., "yes", "looks good", "proceed"). A non-answer is not approval.
 
 ## After the Design
 
@@ -154,7 +154,7 @@ When the brainstormer agent has saved the document:
 ```
 Design saved to `docs/plans/YYYY-MM-DD-<topic>-design.md`.
 
-Ready to create the implementation plan? Use /write-plan to continue.
+Ready to create the implementation plan? Use /plan-like-ken to continue.
 ```
 
 ## Architecture Guidance
@@ -180,7 +180,7 @@ Calibrate depth based on the scope of what's being built:
 |-------------|---------------|
 | "I already know what to build" | Then the questioning phase will be fast. That's not a reason to skip it. Assumptions kill designs. |
 | "Let me just outline the approach" | Outlines skip trade-off analysis and incremental validation. Follow the phases. |
-| "The user seems impatient" | If they entered /brainstorm, they want the design process. Rushing produces bad designs. |
+| "The user seems impatient" | If they entered /think-like-ken, they want the design process. Rushing produces bad designs. |
 | "This is basically the same as project X" | Every project has unique constraints. Ask the questions to find them. |
 | "I'll present the whole design at once" | Dumping 1000 words without checkpoints means rework when section 3 invalidates section 1. Present in sections. |
 | "Multiple choice is too constraining" | Then use open-ended. But don't bundle multiple questions to compensate. One at a time. |
@@ -212,20 +212,20 @@ Every project goes through this process. A todo list, a single-function utility 
 ## Announcement
 
 When entering this mode, announce:
-"I'm entering brainstorm mode to refine your idea into a solid design. I'll ask questions one at a time, explore approaches, then present the design in digestible sections. Once we've validated everything, I'll delegate to a specialist agent to write the design document."
+"I'm entering think-like-ken mode to refine your idea into a solid design. I'll ask questions one at a time, explore approaches, then present the design in digestible sections. Once we've validated everything, I'll delegate to a specialist agent to write the design document."
 
 ## Transitions
 
 **Done when:** Design document saved to `docs/plans/`
 
-**Golden path:** `/write-plan`
-- Tell user: "Design complete and saved to [path]. Use `/write-plan` to create an implementation plan, or I can run the full development cycle recipe to handle everything from here."
-- Use `mode(operation='set', name='write-plan')` to transition. The first call will be denied (gate policy); call again to confirm.
+**Golden path:** `/plan-like-ken`
+- Tell user: "Design complete and saved to [path]. Use `/plan-like-ken` to create an implementation plan, or I can run the full development cycle recipe to handle everything from here."
+- Use `mode(operation='set', name='plan-like-ken')` to transition. The first call will be denied (gate policy); call again to confirm.
 
 **Dynamic transitions:**
 - If bug mentioned -> use `mode(operation='set', name='debug')` because systematic debugging has its own process
-- If already have a clear spec -> use `mode(operation='set', name='write-plan')` because design refinement isn't needed
-- If user wants to explore code first -> stay in brainstorm, use available exploration and code intelligence agents (explorer, LSP agents, language-specific experts, repo-specific experts as available) to survey the codebase, then resume the design conversation
+- If already have a clear spec -> use `mode(operation='set', name='plan-like-ken')` because design refinement isn't needed
+- If user wants to explore code first -> stay in think-like-ken, use available exploration and code intelligence agents (explorer, LSP agents, language-specific experts, repo-specific experts as available) to survey the codebase, then resume the design conversation
 
 **Skill connection:** If you load a workflow skill (brainstorming, writing-plans, etc.),
 the skill tells you WHAT to do. This mode enforces HOW. They complement each other.

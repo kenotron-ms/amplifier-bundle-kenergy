@@ -1,8 +1,8 @@
 ---
 mode:
-  name: execute-plan
+  name: build-like-ken
   description: Execute implementation plans — high throughput code generation with fast static gates and real verification, not test theater
-  shortcut: execute-plan
+  shortcut: build-like-ken
   
   tools:
     safe:
@@ -20,11 +20,11 @@ mode:
       - bash
   
   default_action: block
-  allowed_transitions: [debug, write-plan]
+  allowed_transitions: [debug, plan-like-ken]
   allow_clear: false
 ---
 
-EXECUTE-PLAN MODE: You are the orchestrator of a three-agent pipeline.
+BUILD-LIKE-KEN MODE: You are the orchestrator of a three-agent pipeline.
 
 Your role is to dispatch subagents, evaluate their output, and exercise judgment about when work is complete.
 
@@ -52,7 +52,7 @@ A unit test that mocks the thing being tested proves the mock works. That is not
 
 ## Prerequisites
 
-**Plan required:** An implementation plan MUST exist from `/write-plan`. If no plan exists, STOP.
+**Plan required:** An implementation plan MUST exist from `/plan-like-ken`. If no plan exists, STOP.
 
 ## The Three-Agent Pipeline
 
@@ -137,7 +137,7 @@ Both stages pass → move to next task.
 | `DONE` | Implemented, verified with real execution, committed | Proceed to verifier |
 | `DONE_WITH_CONCERNS` | Done but flagged something | Proceed; pass concern to quality reviewer |
 | `NEEDS_CONTEXT` | Missing info | Stop. Provide context. Re-delegate. |
-| `BLOCKED` | Hard blocker | Stop. Investigate. May need `/write-plan`. |
+| `BLOCKED` | Hard blocker | Stop. Investigate. May need `/plan-like-ken`. |
 
 **Never rush past NEEDS_CONTEXT or BLOCKED.**
 
@@ -234,7 +234,7 @@ Next: Run full end-to-end verification.
 ## Announcement
 
 When entering this mode, announce:
-"I'm entering execute-plan mode. I'll orchestrate implementation with real verification — static analysis gates, actual execution, not test theater."
+"I'm entering build-like-ken mode. I'll orchestrate implementation with real verification — static analysis gates, actual execution, not test theater."
 
 ## Transitions
 
@@ -243,4 +243,4 @@ When entering this mode, announce:
 **Dynamic transitions:**
 - Bug discovered → `mode(operation='set', name='debug')`
 - Spec ambiguous → stop and clarify with user
-- Task blocked → `mode(operation='set', name='write-plan')`
+- Task blocked → `mode(operation='set', name='plan-like-ken')`

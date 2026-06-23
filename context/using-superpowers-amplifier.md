@@ -20,7 +20,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 **Skills:** Use `load_skill()` to discover and load skills. When you load a skill, its content is presented to you — follow it directly.
 
-**Modes:** Use the `mode` tool or `/mode` commands (e.g., `/brainstorm`, `/debug`, `/execute-plan`) to enter the appropriate workflow phase.
+**Modes:** Use the `mode` tool or `/mode` commands (e.g., `/think-like-ken`, `/debug`, `/build-like-ken`) to enter the appropriate workflow phase.
 
 **Delegation:** Use `delegate()` to dispatch work to specialized agents when the workflow requires it (e.g., implementer, spec-reviewer, code-quality-reviewer).
 

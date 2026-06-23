@@ -24,9 +24,9 @@ Opinionated development workflow for people who believe that:
 
 | Mode | What it does |
 |------|-------------|
-| `/brainstorm` | Explore → question → propose approaches → validate design section-by-section |
-| `/write-plan` | Review design → discuss task breakdown → delegate plan creation to an agent |
-| `/execute-plan` | Three-agent pipeline: implementer → verifier → code-quality-reviewer |
+| `/think-like-ken` | Explore → question → propose approaches → validate design section-by-section |
+| `/plan-like-ken` | Review design → discuss task breakdown → delegate plan creation to an agent |
+| `/build-like-ken` | Three-agent pipeline: implementer → verifier → code-quality-reviewer |
 
 **Five persona reviewer skills** you can load at any checkpoint:
 
