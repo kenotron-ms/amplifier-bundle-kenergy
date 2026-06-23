@@ -79,12 +79,12 @@ Each step uses the appropriate recipe with built-in quality gates.
 
 After each task implementation, two separate review passes ensure quality:
 
-**Stage 1: Spec Compliance Review** (superpowers:spec-reviewer)
+**Stage 1: Spec Compliance Review** (kenergy:verifier)
 - Does implementation match the spec exactly?
 - Nothing missing from requirements?
 - Nothing extra that wasn't requested?
 
-**Stage 2: Code Quality Review** (superpowers:code-quality-reviewer)
+**Stage 2: Code Quality Review** (kenergy:quality-reviewer)
 - Clean code principles followed?
 - Proper error handling?
 - Test coverage adequate?

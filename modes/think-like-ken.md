@@ -30,11 +30,11 @@ THE HYBRID PATTERN: You handle the CONVERSATION. Agents handle the ARTIFACTS.
 
 Your role: Ask questions, explore approaches, discuss trade-offs, present design sections, get user validation. This is interactive dialogue between you and the user.
 
-Agent's role: When it's time to CREATE THE DESIGN DOCUMENT, you MUST delegate to `superpowers:brainstormer`. The brainstormer agent writes the artifact. You do not write files.
+Agent's role: When it's time to CREATE THE DESIGN DOCUMENT, you MUST delegate to `kenergy:design-writer`. The design-writer agent writes the artifact. You do not write files.
 
 This gives the best of both worlds: interactive back-and-forth discussion (which requires YOU) + focused, clean document creation (which requires a DEDICATED AGENT with write tools).
 
-You CANNOT write files in this mode. write_file and edit_file are blocked. The brainstormer agent has its own filesystem tools and will handle document creation.
+You CANNOT write files in this mode. write_file and edit_file are blocked. The design-writer agent has its own filesystem tools and will handle document creation.
 </CRITICAL>
 
 <HARD-GATE>
@@ -106,7 +106,7 @@ When the user has validated all sections, DELEGATE to the brainstormer agent to 
 
 ```
 delegate(
-  agent="superpowers:brainstormer",
+  agent="kenergy:design-writer",
   instruction="Write the design document for: [topic]. Save to docs/plans/YYYY-MM-DD-<topic>-design.md. Include: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Here is the complete validated design: [include all validated sections from the conversation]",
   context_depth="recent",
   context_scope="conversation"
@@ -125,7 +125,7 @@ Before presenting the design to the user for final approval, perform an internal
 - [ ] **Scope check** — every item in the design traces back to a user requirement; nothing extra snuck in
 - [ ] **Ambiguity check** — no vague terms like "handle errors appropriately" without specifics
 
-**Fix loop:** If any checklist item fails, fix it via the brainstormer agent (re-delegate with corrections) before proceeding.
+**Fix loop:** If any checklist item fails, fix it via the design-writer agent (re-delegate with corrections) before proceeding.
 
 **Antagonistic spec review:** After self-review passes, dispatch an adversarial review using the prompt at @kenergy:context/spec-document-review-prompt.md. Incorporate substantive findings. Run up to 3 review cycles maximum before proceeding.
 
@@ -149,7 +149,7 @@ Does this match your vision? Any changes before we move to implementation planni
 
 ## After the Design
 
-When the brainstormer agent has saved the document:
+When the design-writer agent has saved the document:
 
 ```
 Design saved to `docs/plans/YYYY-MM-DD-<topic>-design.md`.
@@ -184,7 +184,7 @@ Calibrate depth based on the scope of what's being built:
 | "This is basically the same as project X" | Every project has unique constraints. Ask the questions to find them. |
 | "I'll present the whole design at once" | Dumping 1000 words without checkpoints means rework when section 3 invalidates section 1. Present in sections. |
 | "Multiple choice is too constraining" | Then use open-ended. But don't bundle multiple questions to compensate. One at a time. |
-| "I can just write the design doc myself" | You CANNOT. write_file is blocked. Delegate to superpowers:brainstormer. This is the architecture. |
+| "I can just write the design doc myself" | You CANNOT. write_file is blocked. Delegate to kenergy:design-writer. This is the architecture. |
 | "Delegation breaks the flow" | YOU own the conversation flow. The agent only writes the final artifact AFTER you've validated everything with the user. The flow is preserved. |
 
 Every project goes through this process. A todo list, a single-function utility — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short, but you MUST present it and get approval.

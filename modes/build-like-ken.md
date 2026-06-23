@@ -61,7 +61,7 @@ For EACH task in the plan, execute these stages IN ORDER:
 ### Stage 1: DELEGATE to implementer
 ```
 delegate(
-  agent="behavioral-anchor:agents/builder",
+  agent="kenergy:implementer",
   instruction="""Implement Task N of M: [task name]
 
 Context: [What was built in previous tasks. What this builds on.]
@@ -91,7 +91,7 @@ Wait for completion before Stage 2.
 ### Stage 2: DELEGATE to verifier
 ```
 delegate(
-  agent="behavioral-anchor:agents/builder",
+  agent="kenergy:verifier",
   instruction="""Review Task N of M: [task name] — VERIFICATION REVIEW
 
 Requirements from plan:
@@ -115,7 +115,7 @@ If FAIL → DELEGATE back to implementer with fix instructions. DO NOT fix it yo
 ### Stage 3: DELEGATE to code-quality-reviewer
 ```
 delegate(
-  agent="behavioral-anchor:agents/builder",
+  agent="kenergy:quality-reviewer",
   instruction="""Review Task N of M: [task name] — CODE QUALITY REVIEW
 
 Review for: correctness, no unnecessary complexity, clean code, no dead code, no commented-out code.

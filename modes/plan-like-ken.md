@@ -31,7 +31,7 @@ THE HYBRID PATTERN: You handle the CONVERSATION. Agents handle the ARTIFACTS.
 
 Your role: Read the design document, review the codebase, discuss the plan structure with the user, identify task boundaries and dependencies. This is analytical work between you and the user.
 
-Agent's role: When it's time to CREATE THE PLAN DOCUMENT, you MUST delegate to `behavioral-anchor:agents/builder`. The builder agent writes the artifact. You do not write files.
+Agent's role: When it's time to CREATE THE PLAN DOCUMENT, you MUST delegate to `kenergy:plan-writer`. The plan-writer agent writes the artifact. You do not write files.
 
 You CANNOT write files in this mode. write_file and edit_file are blocked. The builder agent has its own filesystem tools and will handle document creation.
 </CRITICAL>
@@ -99,7 +99,7 @@ Once the plan structure is agreed, DELEGATE to builder:
 
 ```
 delegate(
-  agent="behavioral-anchor:agents/builder",
+  agent="kenergy:plan-writer",
   instruction="""Create implementation plan from the design at [path].
 
 Audience: enthusiastic junior engineer with zero context and questionable taste.
@@ -202,7 +202,7 @@ git commit -m "feat: [what this does]"
 | "The logic is simple, no need to run it" | Simple logic has simple bugs. Run it. |
 | "I'll verify it later" | Later doesn't exist in a plan. Specify the verification now or it won't happen. |
 | "Curl calls are fragile" | Less fragile than a mock that never breaks because it never touches reality. |
-| "I can just write the plan myself" | You CANNOT. write_file is blocked. Delegate to behavioral-anchor:agents/builder. |
+| "I can just write the plan myself" | You CANNOT. write_file is blocked. Delegate to kenergy:plan-writer. |
 | "The test passes" | Does the feature work? Those are different questions. |
 
 ## Do NOT:

@@ -16,11 +16,11 @@ The modes form a complete development loop. Use them in order.
 
 **`/think-like-ken`** — Design before code.
 
-Explore requirements through dialogue (one question at a time), propose 2–3 approaches with trade-offs, validate the design section-by-section before writing a word of code. Delegates document creation to `superpowers:brainstormer` — the orchestrator converses, the agent writes the artifact.
+Explore requirements through dialogue (one question at a time), propose 2–3 approaches with trade-offs, validate the design section-by-section before writing a word of code. Delegates document creation to `kenergy:design-writer` — the orchestrator converses, the agent writes the artifact.
 
 **`/plan-like-ken`** — Plan before implementation.
 
-Review the design doc, map dependencies, decide the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation to `behavioral-anchor:agents/builder`.
+Review the design doc, map dependencies, decide the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation to `kenergy:plan-writer`.
 
 **`/build-like-ken`** — Three-agent execution with real verification.
 
@@ -111,8 +111,7 @@ grep -ic "leverage\|utilize\|seamless\|robust" "$1"  # AI trigger words
 
 This bundle automatically installs:
 
-- **[amplifier-bundle-superpowers](https://github.com/microsoft/amplifier-bundle-superpowers)** — provides `superpowers:brainstormer` (used by `/think-like-ken`)
-- **[behavioral-anchor](https://github.com/microsoft/amplifier-foundation/tree/main/experiments/behavioral-anchor)** — provides `behavioral-anchor:agents/builder` (used by `/plan-like-ken` and `/build-like-ken`)
+- **[amplifier-bundle-superpowers](https://github.com/microsoft/amplifier-bundle-superpowers)** — provides the superpowers recipe infrastructure and base agents that kenergy extends
 
 ## Philosophy
 
