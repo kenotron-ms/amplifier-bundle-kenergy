@@ -285,12 +285,12 @@ If the session used `--project-dir`, mockup files persist in `.superpowers/brain
 
 ## Reference
 
-Inspect the server infrastructure files via `@superpowers:` bundle paths:
+The visual companion server scripts live in the `.visual-companion/` directory created during setup. After running the setup commands above, you can inspect them at:
 
-- **Frame template** (full CSS reference): `@superpowers:scripts/frame-template.html`
-- **Helper script** (client-side interaction): `@superpowers:scripts/helper.js`
-- **Server** (Node.js implementation): `@superpowers:scripts/server.cjs`
-- **Start script**: `@superpowers:scripts/start-server.sh`
-- **Stop script**: `@superpowers:scripts/stop-server.sh`
+- **Frame template** (full CSS reference): `.visual-companion/frame-template.html`
+- **Helper script** (client-side interaction): `.visual-companion/helper.js`
+- **Server** (Node.js implementation): `.visual-companion/server.cjs`
+- **Start script**: `.visual-companion/start-server.sh`
+- **Stop script**: `.visual-companion/stop-server.sh`
 
-Use `read_file` with these `@superpowers:` paths to inspect the implementation when debugging or extending the server.
+Use `read_file` with these paths to inspect the implementation when debugging or extending the server.

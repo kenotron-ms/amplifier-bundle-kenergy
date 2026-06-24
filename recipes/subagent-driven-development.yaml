@@ -1,0 +1,437 @@
+# Subagent-Driven Development Workflow
+# A sophisticated implementation workflow that dispatches fresh agents per task,
+# with two-stage review after each: verification first, then code quality.
+#
+# Key Features:
+#   - Fresh agent per task (no context pollution between tasks)
+#   - Per-task sequential pipeline (implement -> verifier loop -> quality-review loop)
+#   - Review convergence loops iterate until APPROVED
+#   - Human approval gate after final review before finishing
+#
+# Workflow:
+#   For EACH task:
+#     1. Dispatch fresh implementer agent (VDD approach — real execution)
+#     2. Verification review - iterate until verified
+#     3. Code quality review - iterate until approved
+#     4. Mark task complete
+#   After ALL tasks:
+#     5. Full code review of entire implementation
+#     6. APPROVAL GATE - human checkpoint
+#     7. Verify and present merge options
+#
+# Usage:
+#   amplifier run "execute kenergy:recipes/subagent-driven-development.yaml with plan_path=docs/implementation-plan.md"
+#
+# After the approval gate:
+#   amplifier run "list pending approvals"
+#   amplifier run "approve recipe session <session-id> stage final-review"
+#   amplifier run "resume recipe session <session-id>"
+
+name: "subagent-driven-development"
+description: "Execute implementation plan with fresh agents per task and two-stage review (verification then code quality)"
+version: "4.0.4"
+author: "Kenergy Bundle"
+tags: ["implementation", "subagent", "vdd", "two-stage-review", "code-quality", "foreach", "per-task-pipeline", "checkpoint", "tiered-review"]
+
+context:
+  plan_path: ""  # Required: Path to the implementation plan file
+  task_parallelism: false  # Set to 2 or 3 to enable bounded parallel task execution
+
+rate_limiting:
+  max_concurrent_llm: 5
+  backoff:
+    enabled: true
+    initial_delay_ms: 2000
+
+stages:
+  # ============================================================================
+  # STAGE 1: Task Execution
+  # Dispatch fresh agents to implement each task with two-stage review
+  # ============================================================================
+  - name: "task-execution"
+    steps:
+      # -----------------------------------------------------------------------
+      # Step 1: Load and Parse Implementation Plan
+      # -----------------------------------------------------------------------
+      - id: "load-plan"
+        agent: "kenergy:plan-writer"
+        prompt: |
+          Load the implementation plan from: {{plan_path}}
+
+          Parse the plan and extract all implementation tasks as a structured list.
+
+          For each task, extract:
+          - task_id: Unique identifier or name
+          - description: What needs to be implemented
+          - spec: The detailed specification/requirements
+          - acceptance_criteria: How to verify the task is complete
+          - files: Files likely to be created or modified
+          - dependencies: Any tasks this depends on (if applicable)
+
+          Return the result as a JSON object with this exact structure:
+          {"tasks": [<array of task objects>], "total_tasks": <number>}
+
+          Each task object in the array must have these keys:
+          - "task_id": string
+          - "description": string
+          - "spec": string (the detailed specification)
+          - "acceptance_criteria": string
+          - "files": array of file paths
+          - "dependencies": array of task_ids (empty array if none)
+
+          The "tasks" key MUST contain the ordered array. Order by dependencies (independent first).
+
+          IMPORTANT: Preserve ALL spec details - they are critical for review.
+        output: "plan_data"
+        parse_json: true
+        timeout: 600
+
+      # -----------------------------------------------------------------------
+      # Step 1.1: Validate Plan Structure
+      # -----------------------------------------------------------------------
+      - id: "validate-plan"
+        type: "bash"
+        timeout: 30
+        command: |
+          python3 - << 'PYEOF'
+          import json, sys, os
+
+          raw = os.environ.get("PLAN_DATA", "null")
+          try:
+              data = json.loads(raw)
+          except json.JSONDecodeError as e:
+              print(f"ERROR: plan_data is not valid JSON: {e}", file=sys.stderr)
+              print(f"Raw plan_data (first 500 chars): {raw[:500]}", file=sys.stderr)
+              sys.exit(1)
+
+          if not isinstance(data, dict) or "tasks" not in data:
+              print("ERROR: plan_data must be a dict with a 'tasks' key", file=sys.stderr)
+              print(f"  type: {type(data).__name__}", file=sys.stderr)
+              if isinstance(data, dict):
+                  print(f"  keys: {list(data.keys())}", file=sys.stderr)
+              print(f"  value (first 500 chars): {json.dumps(data)[:500]}", file=sys.stderr)
+              sys.exit(1)
+
+          tasks = data["tasks"]
+          if not isinstance(tasks, list):
+              print(f"ERROR: plan_data.tasks must be a list, got {type(tasks).__name__}", file=sys.stderr)
+              sys.exit(1)
+
+          if len(tasks) == 0:
+              print("ERROR: plan_data.tasks is empty - no tasks found in plan", file=sys.stderr)
+              sys.exit(1)
+
+          REQUIRED = {"task_id", "description", "spec", "acceptance_criteria", "files"}
+          for i, task in enumerate(tasks):
+              if not isinstance(task, dict):
+                  print(f"ERROR: plan_data.tasks[{i}] is {type(task).__name__}, not a dict", file=sys.stderr)
+                  print(f"  value: {repr(task)}", file=sys.stderr)
+                  sys.exit(1)
+              missing = REQUIRED - set(task.keys())
+              if missing:
+                  tid = task.get("task_id", "UNKNOWN")
+                  print(f"ERROR: plan_data.tasks[{i}] (task_id={tid!r}) missing keys: {sorted(missing)}", file=sys.stderr)
+                  sys.exit(1)
+
+          print(f"plan_data validated: {len(tasks)} task(s) ready for execution")
+          PYEOF
+        env:
+          PLAN_DATA: "{{plan_data}}"
+
+      # -----------------------------------------------------------------------
+      # Step 1.5: Initialize project brief from cache (if exists)
+      # -----------------------------------------------------------------------
+      - id: "init-project-brief"
+        type: "bash"
+        timeout: 10
+        command: |
+          if [ -f ".kenergy-project-brief.txt" ]; then
+            cat .kenergy-project-brief.txt
+          else
+            echo ""
+          fi
+        output: "project_brief"
+
+      # -----------------------------------------------------------------------
+      # Step 2: Per-Task Pipeline
+      # -----------------------------------------------------------------------
+      - id: "per-task-pipeline"
+        foreach: "{{plan_data.tasks}}"
+        as: "current_task"
+        on_error: "continue"
+        parallel: false
+        type: "recipe"
+        recipe: "single-task-pipeline.yaml"
+        context:
+          current_task: "{{current_task}}"
+          project_brief: "{{project_brief}}"
+        collect: "completed_tasks"
+
+      # -----------------------------------------------------------------------
+      # Step 3: Task Completion Summary
+      # -----------------------------------------------------------------------
+      - id: "task-summary"
+        agent: "kenergy:plan-writer"
+        timeout: 120
+        model_role: "fast"
+        prompt: |
+          TASK EXECUTION SUMMARY
+          ======================
+          Compile a summary of all completed tasks.
+
+          COMPLETED TASKS:
+          {{completed_tasks}}
+
+          ORIGINAL TASKS:
+          {{plan_data.tasks}}
+
+          If any tasks have unresolved verification or quality issues (exhausted review iterations),
+          prominently flag them in the summary with WARNING markers.
+
+          Create a comprehensive summary including:
+
+          ## Completion Status
+          - Total tasks: [count]
+          - Successfully completed: [count]
+
+          ## Per-Task Summary
+          For each task:
+          - Task ID/Name
+          - Verification: passed (with iteration count if > 1)
+          - Code quality: approved (with iteration count if > 1)
+          - Files modified
+
+          ## Issues Resolved
+          Summary of issues found and fixed during reviews.
+        output: "execution_summary"
+        on_error: "continue"
+
+  # ============================================================================
+  # STAGE 2: Final Review (APPROVAL GATE)
+  # Full code review of the entire implementation before finishing
+  # ============================================================================
+  - name: "final-review"
+    steps:
+      - id: "full-code-review"
+        agent: "kenergy:quality-reviewer"
+        timeout: 600
+        prompt: |
+          FINAL COMPREHENSIVE CODE REVIEW
+          ================================
+          Review the ENTIRE implementation across all tasks.
+
+          EXECUTION SUMMARY:
+          {{execution_summary}} (may be empty if summarization failed — use completed task data as primary source)
+
+          COMPLETED TASKS:
+          {{completed_tasks}}
+
+          ORIGINAL PLAN:
+          {{plan_path}}
+
+          This is the final review before the implementation is considered complete.
+          Look at the implementation HOLISTICALLY, not just individual tasks.
+
+          REVIEW AREAS:
+          1. CROSS-CUTTING CONCERNS
+             - Are there patterns that should be unified?
+             - Any inconsistencies between tasks?
+             - Shared utilities that should be extracted?
+          2. INTEGRATION
+             - Do all tasks work together correctly?
+             - Any integration issues between components?
+             - Are interfaces consistent?
+          3. ARCHITECTURE
+             - Does the overall structure make sense?
+             - Are dependencies appropriate?
+             - Is the code organized logically?
+          4. VERIFICATION COVERAGE
+             - Were the right verification methods used?
+             - API endpoints verified with real HTTP calls?
+             - UI changes verified visually?
+             - Library code has meaningful test coverage?
+          5. DOCUMENTATION
+             - Is code self-documenting?
+             - Any complex logic that needs comments?
+             - Is the public API clear?
+          6. PRODUCTION READINESS
+             - Error handling comprehensive?
+             - Logging appropriate?
+             - No debug code left in?
+
+          OUTPUT FORMAT:
+          ## Overall Assessment
+          - Implementation Quality: [excellent/good/acceptable/needs-work]
+          - Recommendation: [approve/approve-with-notes/request-changes]
+
+          ## Findings by Category
+          [Group findings by the review areas above]
+
+          ## Critical Issues (if any)
+          [Must be addressed before approval]
+
+          ## Recommendations
+          [Nice-to-have improvements for future]
+
+          ## Files Changed Summary
+          [Complete list of all files modified across all tasks]
+        output: "final_review"
+        retry:
+          max_attempts: 3
+          backoff: exponential
+          initial_delay: 5
+          max_delay: 120
+
+      - id: "prepare-approval"
+        agent: "kenergy:implementer"
+        timeout: 600
+        model_role: "fast"
+        prompt: |
+          Prepare for human approval checkpoint.
+
+          FINAL REVIEW:
+          {{final_review}}
+
+          EXECUTION SUMMARY:
+          {{execution_summary}} (may be empty if summarization failed)
+
+          Run verification to provide current status:
+          - Run static analysis (ruff, ty, tsc — whatever applies)
+          - Run tests if they exist
+          - Report pass/fail status
+
+          Also prepare:
+          - Git status showing all changes
+          - Summary of branch state
+          - List of commits made during implementation
+        output: "approval_prep"
+        on_error: "continue"
+
+    approval:
+      required: true
+      prompt: |
+        ======================================================================
+        FINAL REVIEW COMPLETE - HUMAN APPROVAL REQUIRED
+        ======================================================================
+
+        The subagent-driven implementation is complete. All tasks have been:
+        1. Implemented by fresh agents following VDD (real execution verified)
+        2. Reviewed for spec compliance and verification quality (with iteration until approved)
+        3. Reviewed for code quality (with iteration until approved)
+        4. Given a final comprehensive review
+
+        Review the final assessment above carefully.
+
+        OPTIONS:
+        - APPROVE: Accept the implementation and proceed to finish branch
+        - DENY: Stop and address issues before continuing
+
+        If you have feedback, note it before approving.
+        ======================================================================
+      timeout: 0
+      default: "deny"
+
+  # ============================================================================
+  # STAGE 3: Finish Branch
+  # Verify all checks pass and present merge options
+  # ============================================================================
+  - name: "finish"
+    steps:
+      - id: "verify-tests"
+        agent: "kenergy:implementer"
+        timeout: 600
+        prompt: |
+          FINAL VERIFICATION
+          ==================
+          Perform final verification before presenting merge options.
+
+          FINAL REVIEW:
+          {{final_review}}
+
+          APPROVAL PREP:
+          {{approval_prep}} (may be empty if preparation failed — proceed with verification regardless)
+
+          Execute comprehensive verification:
+          1. RUN STATIC ANALYSIS
+             - Run all applicable tools (ruff, ty, tsc, oxlint)
+             - Ensure no errors
+          2. RUN TEST SUITE (if tests exist)
+             - Run ALL tests
+             - Note test counts and coverage
+          3. BUILD CHECK (if applicable)
+             - Verify project builds successfully
+          4. FINAL GIT STATUS
+             - Confirm all changes are committed
+             - No uncommitted files
+             - Branch is clean
+
+          Report any failures. These MUST be fixed before merge.
+        output: "verification_results"
+
+      - id: "present-merge-options"
+        agent: "foundation:zen-architect"
+        mode: "ARCHITECT"
+        timeout: 600
+        model_role: "fast"
+        prompt: |
+          IMPLEMENTATION COMPLETE - MERGE OPTIONS
+          =======================================
+
+          VERIFICATION RESULTS:
+          {{verification_results}}
+
+          EXECUTION SUMMARY:
+          {{execution_summary}} (may be empty if summarization failed)
+
+          FINAL REVIEW:
+          {{final_review}}
+
+          Present the completion status and merge options.
+
+          IF VERIFICATION PASSED:
+
+          ## Implementation Complete
+
+          All tasks from the implementation plan have been:
+          - Implemented following VDD (static analysis + real execution)
+          - Reviewed for spec compliance and verification quality
+          - Reviewed for code quality
+          - Verified with passing checks
+
+          ### Summary
+          - Tasks completed: [count]
+          - Verification: [status]
+
+          ### Files Changed
+          [Complete list of modified files]
+
+          ### Next Steps - Choose One:
+          1. **Merge to main branch**
+             ```bash
+             git checkout main
+             git merge <current-branch>
+             git push origin main
+             ```
+          2. **Create Pull Request**
+             For team code review before merging.
+             ```bash
+             gh pr create --title "Implementation: [plan name]" --body "..."
+             ```
+          3. **Additional Human Review**
+             Request detailed walkthrough of changes.
+
+          ### Branch Information
+          [Current branch name and commit info]
+
+          IF VERIFICATION FAILED:
+
+          ## Issues Found
+          List what failed and needs to be addressed.
+          Do NOT present merge options until issues are resolved.
+
+          ### Required Fixes
+          [List each issue that must be fixed]
+
+          ### Next Steps
+          Fix the listed issues, then re-run verification.
+        output: "completion_report"

@@ -1,0 +1,278 @@
+# Writing Plans Workflow
+# Creates detailed VDD implementation plans from design documents
+#
+# Usage:
+#   amplifier run "execute kenergy:recipes/writing-plans.yaml with design_path=docs/designs/my-feature.md"
+#
+# This recipe:
+#   1. Reads and analyzes a design document
+#   2. Breaks it down into implementable tasks with VDD verification methods
+#   3. Creates a detailed plan
+#   4. PAUSES for human approval
+#   5. Saves the plan to docs/plans/
+#   6. Offers execution options
+
+name: "writing-plans"
+description: "Create detailed VDD implementation plans with bite-sized tasks (2-5 min each) and human approval gate"
+version: "1.0.2"
+author: "Kenergy Bundle"
+tags: ["planning", "implementation", "vdd", "workflow"]
+
+context:
+  design_path: ""    # Required: path to design document
+  feature_name: ""   # Optional: extracted from design if not provided
+
+stages:
+  # ============================================================================
+  # STAGE 1: Planning
+  # ============================================================================
+  - name: "planning"
+    steps:
+      - id: "load-design"
+        agent: "kenergy:plan-writer"
+        prompt: |
+          Read and analyze the design document at: {{design_path}}
+
+          Extract and provide:
+          1. **Feature Name**: A kebab-case identifier for this feature
+          2. **Goals**: What we're building and why
+          3. **Architecture Decisions**: Key technical choices made
+          4. **Tech Stack**: Technologies, frameworks, and tools needed
+          5. **Dependencies**: External services, libraries, or prerequisites
+          6. **Constraints**: Any limitations or requirements to consider
+          7. **Verification Approach**: How the design says we'll prove it works
+
+          If a feature_name was provided ({{feature_name}}), use that. Otherwise, derive a suitable kebab-case name from the design.
+
+          Format your response as a structured summary that can be used for implementation planning.
+        output: "design_analysis"
+
+      - id: "analyze-requirements"
+        agent: "kenergy:plan-writer"
+        prompt: |
+          Based on this design analysis:
+          {{design_analysis}}
+
+          Break down the implementation into discrete, implementable tasks.
+
+          For each task, identify:
+          - **What**: Clear description of what needs to be done
+          - **Files**: Exact file paths to create or modify
+          - **Verification method**: How to prove this task works (the right level from VDD hierarchy)
+          - **Dependencies**: Which tasks must complete first
+          - **Complexity**: Simple (2 min), Medium (3-4 min), or Complex (5 min)
+
+          VDD verification hierarchy — choose the cheapest that genuinely proves the claim:
+          1. Static analysis (ruff/ty/tsc) — always free
+          2. Run the code directly — scripts, CLIs
+          3. curl/HTTP call against running server — endpoints
+          4. Browser via playwright-cli — UI changes
+          5. DTU/Reality Check — true isolation
+
+          Requirements:
+          - Each task MUST be completable in 2-5 minutes
+          - If a task is larger, break it into smaller sub-tasks
+          - Group related tasks logically
+          - Order tasks by dependency
+          - Every task MUST specify its verification method — no "test it manually"
+        output: "task_breakdown"
+
+      - id: "create-plan"
+        agent: "kenergy:plan-writer"
+        prompt: |
+          Create a comprehensive VDD implementation plan based on:
+
+          Design Analysis:
+          {{design_analysis}}
+
+          Task Breakdown:
+          {{task_breakdown}}
+
+          Generate a plan in this EXACT format:
+
+          ---
+          # Implementation Plan: [Feature Name]
+
+          > **For execution:** Use `/build-like-ken` mode.
+
+          **Date**: [Today's date in YYYY-MM-DD format]
+          **Design Source**: {{design_path}}
+
+          **Goal:** [Clear 1-2 sentence statement of what we're building]
+          **Architecture:** [Key architectural decisions and patterns being used]
+          **Tech Stack:** [List of technologies, frameworks, libraries]
+          **Verification approach:** [How the feature will be proven to work end-to-end]
+
+          ---
+
+          ## Tasks
+
+          ### Task 1: [Task Name]
+
+          **Files:**
+          - Create: `exact/path/to/file.py`
+          - Modify: `exact/path/to/existing.py:123-145`
+
+          **Implementation**
+          ```[language]
+          // Complete, copy-pasteable implementation code
+          // No placeholders or "..." - include EVERYTHING
+          ```
+
+          **Static Analysis** (always run first — fast and free)
+          ```bash
+          ruff check src/path/to/file.py
+          ```
+          Expected: no errors
+
+          **Verification** (pick the right VDD level)
+          [ONE of:]
+          - `curl -X POST http://localhost:8000/endpoint -d '{}'` → Expected: `{"status": "ok"}`
+          - `pytest tests/path/test_file.py -v` → Expected: PASS (library code only)
+          - `playwright-cli open http://localhost:3000/feature` → Expected: [describe what you see]
+          - `python -c "from module import fn; print(fn(input))"` → Expected: `output`
+
+          **Commit**
+          ```bash
+          git add [files]
+          git commit -m "feat: [what this does]"
+          ```
+
+          ---
+
+          [Continue for all tasks...]
+
+          ---
+
+          ## Summary
+
+          - **Total Tasks**: [N]
+          - **Estimated Time**: [X-Y] minutes
+          - **Key Risks**: [Any risks or areas needing attention]
+
+          ---
+
+          CRITICAL REQUIREMENTS:
+          1. Assume the engineer has ZERO context about this codebase
+          2. Every code block must be COMPLETE and copy-pasteable
+          3. NO placeholders like "..." or "// add your code here"
+          4. Each step is ONE atomic action (2-5 minutes max)
+          5. Include exact file paths, not relative descriptions
+          6. Verification commands must be exact and runnable
+          7. Every task MUST have a verification method specified
+          8. Do NOT default to "write a unit test" for non-library code
+
+          Generate the complete implementation plan now.
+        output: "implementation_plan"
+
+    approval:
+      required: true
+      prompt: |
+        **Implementation Plan Ready for Review**
+
+        The plan has been generated based on your design document.
+
+        Please review the implementation plan above and verify:
+        - [ ] Tasks are appropriately sized (2-5 minutes each)
+        - [ ] Code blocks are complete and copy-pasteable
+        - [ ] Every task has a verification method specified
+        - [ ] Verification methods are appropriate (curl for endpoints, not unit tests)
+        - [ ] File paths are accurate
+        - [ ] Dependencies between tasks are correct
+
+        **Approve** to save the plan and see execution options.
+        **Deny** if revisions are needed.
+      timeout: 0
+      default: "deny"
+
+  # ============================================================================
+  # STAGE 2: Finalization
+  # ============================================================================
+  - name: "finalization"
+    steps:
+      - id: "extract-metadata"
+        agent: "kenergy:plan-writer"
+        prompt: |
+          From this design analysis, extract the feature name:
+          {{design_analysis}}
+
+          If a feature_name was explicitly provided ({{feature_name}}), use that.
+          Otherwise, extract the kebab-case feature name from the design analysis.
+
+          Respond with ONLY the kebab-case feature name (e.g., "user-authentication").
+          No explanation, no quotes, just the name.
+        output: "extracted_feature_name"
+
+      - id: "save-plan"
+        agent: "kenergy:plan-writer"
+        prompt: |
+          Save the implementation plan to the filesystem.
+
+          Plan content to save:
+          {{implementation_plan}}
+
+          Instructions:
+          1. Create the directory `docs/plans/` if it doesn't exist
+          2. Save the plan to: `docs/plans/YYYY-MM-DD-{{extracted_feature_name}}-plan.md`
+             (Use today's date for YYYY-MM-DD)
+          3. Use the filesystem tools to write the file
+
+          After saving, report:
+          - The exact file path where the plan was saved
+          - Confirmation that the file was written successfully
+        output: "saved_plan_path"
+
+      - id: "offer-execution"
+        agent: "kenergy:plan-writer"
+        prompt: |
+          The implementation plan has been saved.
+          Plan location: {{saved_plan_path}}
+
+          Present the user with these execution options in a clear, formatted way:
+
+          ---
+
+          ## Plan Saved Successfully
+
+          Your implementation plan is ready at: `{{saved_plan_path}}`
+
+          ### Next Steps - Choose Your Execution Style
+
+          #### Option 1: Subagent-Driven Development
+          Execute with fresh agents per task and two-stage review (VDD):
+          - Fresh implementer agent per task (static analysis + real execution)
+          - Verification review after each task (spec compliance + real execution check)
+          - Code quality review after each task
+          - Human approval gate before finishing
+
+          **Best for**: Complex features, when you want thorough quality gates
+
+          **To start**:
+          ```
+          Execute kenergy:recipes/subagent-driven-development.yaml with plan_path={{saved_plan_path}}
+          ```
+
+          ---
+
+          #### Option 2: Batch Execution
+          Execute in batches with human checkpoints between each batch.
+
+          **Best for**: Large plans, when you want periodic check-ins
+
+          **To start**:
+          ```
+          Execute kenergy:recipes/executing-plans.yaml with plan_path={{saved_plan_path}}
+          ```
+
+          ---
+
+          #### Option 3: Manual Execution
+          Follow the plan yourself at your own pace using `/build-like-ken` mode.
+
+          **Best for**: When you want full control
+
+          ---
+
+          What would you like to do?
+        output: "execution_options"
+        on_error: "continue"

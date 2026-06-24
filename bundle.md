@@ -5,7 +5,6 @@ bundle:
   description: Opinionated development workflow bundle — VDD modes, persona reviewer skills, and a philosophy stack built around the principle that human attention is sacred
 
 includes:
-  - bundle: git+https://github.com/microsoft/amplifier-bundle-superpowers@main
   - bundle: git+https://github.com/microsoft/amplifier-foundation@main#subdirectory=experiments/behavioral-anchor/behavioral-anchor.md
   - bundle: kenergy:behaviors/kenergy
 ---
