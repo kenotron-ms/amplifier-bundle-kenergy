@@ -3,6 +3,15 @@ bundle:
   version: 1.0.0
   description: Wires kenergy modes, skills, and philosophy context
 
+agents:
+  include:
+    - kenergy:plan-writer
+    - kenergy:implementer
+    - kenergy:verifier
+    - kenergy:code-reviewer
+    - kenergy:design-writer
+    - kenergy:quality-reviewer
+
 hooks:
   - module: hooks-mode
     config:
