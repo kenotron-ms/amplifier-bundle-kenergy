@@ -272,9 +272,22 @@ stages:
               raise SystemExit(f"BLOCKED: worktree not found: {worktree}")
           if not source_plan.is_file():
               raise SystemExit(f"BLOCKED: implementation plan not found: {source_plan}")
+          try:
+              target_plan.relative_to(worktree)
+          except ValueError:
+              raise SystemExit(
+                  f"BLOCKED: target plan {target_plan} is not inside worktree {worktree}"
+              )
 
           target_plan.parent.mkdir(parents=True, exist_ok=True)
           shutil.copy2(source_plan, target_plan)
+          copied_plan = target_plan.resolve()
+          try:
+              copied_plan.relative_to(worktree)
+          except ValueError:
+              raise SystemExit(
+                  f"BLOCKED: copied plan {copied_plan} is not inside worktree {worktree}"
+              )
           print(json.dumps({"path": str(worktree), "plan_path": os.environ["PLAN_PATH"]}))
           PYEOF
         env:

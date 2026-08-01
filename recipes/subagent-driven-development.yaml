@@ -69,12 +69,14 @@ stages:
               ).strip()
           ).resolve()
           if git_root != root:
-              raise SystemExit(
-                  f"BLOCKED: execution root must be the Git worktree root: {root}"
-              )
+              raise SystemExit(f"BLOCKED: execution root must be the Git worktree root: {root}")
 
           raw_plan = Path(os.environ["PLAN_PATH"]).expanduser()
           plan = raw_plan.resolve() if raw_plan.is_absolute() else (root / raw_plan).resolve()
+          try:
+              plan.relative_to(root)
+          except ValueError:
+              raise SystemExit(f"BLOCKED: plan {plan} is not inside execution root {root}")
           if not plan.is_file():
               raise SystemExit(f"BLOCKED: plan not found in execution root: {plan}")
 
