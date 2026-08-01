@@ -15,7 +15,16 @@ author: "Kenergy Bundle"
 tags: ["implementation", "per-task", "pipeline", "vdd", "packet-review", "bounded-fix"]
 
 context:
-  current_task: {}
+  current_task:
+    task_id: ""
+    description: ""
+    spec: ""
+    acceptance_criteria: ""
+    interfaces: ""
+    files: ""
+    implementation_model_role: ""
+    review_model_role: ""
+    escalated_model_role: ""
   plan_identity: ""
   state_dir: ""
   ledger_path: ""
