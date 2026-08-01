@@ -61,16 +61,15 @@ Five short context files that enforce the shared discipline:
 | File | What it does |
 |------|-------------|
 | `instructions.md` | Core mandate: check skills/modes BEFORE any response |
-| `philosophy.md` | The 7-principle philosophy (TDD, systematic, evidence, simplicity, structured planning, isolation, human checkpoints) |
+| `philosophy.md` | The 7-principle philosophy (VDD, systematic, evidence, simplicity, structured planning, isolation, human checkpoints) |
 | `using-superpowers-amplifier.md` | Amplifier-specific meta-instructions and red-flag thought table |
 | `shared-anti-rationalization.md` | YAGNI enforcement, false completion prevention, three-fix escalation rule |
 | `verification-failure-memories.md` | Five cautionary vignettes of false completion patterns |
 
-Three heavier reference files live in `context/` but are **not** always loaded (to preserve token budget):
+Two heavier reference files live in `context/` but are **not** always loaded (to preserve token budget):
 
 - `spec-document-review-prompt.md` — antagonistic spec reviewer dispatch template (referenced by `/think-like-ken`)
 - `debugging-techniques.md` — root-cause tracing reference
-- `tdd-depth.md` — TDD iron law, anti-patterns, and extended rebuttals
 
 To always load any of these, add them to your `~/.amplifier/context/`.
 

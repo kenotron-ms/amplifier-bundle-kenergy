@@ -28,7 +28,7 @@ context:
     # Core mandate: check skills and modes BEFORE any response
     - kenergy:context/instructions.md
 
-    # Foundational philosophy: VDD, TDD, systematic over ad-hoc
+    # Foundational philosophy: VDD, systematic over ad-hoc
     - kenergy:context/philosophy.md
 
     # Amplifier-specific meta-instructions and red-flag table
@@ -40,8 +40,8 @@ context:
     # Cautionary failure vignettes — patterns that lead to false completions
     - kenergy:context/verification-failure-memories.md
 
-    # The remaining context files (spec-document-review-prompt.md,
-    # debugging-techniques.md, tdd-depth.md)
+    # The remaining context files (spec-document-review-prompt.md
+    # and debugging-techniques.md)
     # are available in kenergy:context/ for modes and agents to @mention
     # but are NOT loaded on every turn. This preserves token budget.
     # To always load them, add them to your own ~/.amplifier/context/.
