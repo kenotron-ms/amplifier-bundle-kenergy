@@ -4,6 +4,7 @@
 #
 # Context variables received from parent:
 #   current_task: The task object with task_id, description, spec, roles, and interfaces.
+#   worktree_path: Absolute Git worktree root for every filesystem and Git operation.
 #   plan_identity: Absolute path of the active implementation plan.
 #   state_dir: Plan-scoped durable state directory.
 #   ledger_path: Plan-scoped durable ledger.
@@ -25,6 +26,7 @@ context:
     implementation_model_role: ""
     review_model_role: ""
     escalated_model_role: ""
+  worktree_path: "."
   plan_identity: ""
   state_dir: ""
   ledger_path: ""
@@ -59,6 +61,7 @@ steps:
   # --- 2.0a: Trust completion only when a safe ledger entry matches Git history ---
   - id: "check-task-complete"
     type: "bash"
+    cwd: "{{worktree_path}}"
     timeout: 30
     command: |
       set -eu
@@ -110,6 +113,7 @@ steps:
 
   - id: "prepare-task-state"
     type: "bash"
+    cwd: "{{worktree_path}}"
     timeout: 30
     command: |
       set -eu
@@ -178,6 +182,7 @@ steps:
 
   - id: "load-plan-brief"
     type: "bash"
+    cwd: "{{worktree_path}}"
     timeout: 10
     command: |
       cat "{{ledger_path}}"
@@ -191,6 +196,13 @@ steps:
     prompt: &implementation_prompt |
       IMPLEMENT ONE TASK
       ==================
+
+      EXECUTION ROOT
+      ==============
+      {{worktree_path}}
+
+      Run every filesystem, shell, verification, and Git operation inside this
+      exact worktree. Do not read, write, test, or commit in the parent checkout.
 
       TASK GOAL
       =========
@@ -259,6 +271,7 @@ steps:
   - id: "extract-initial-implementation-report"
     condition: "{{task_already_done}} != 'true'"
     type: "bash"
+    cwd: "{{worktree_path}}"
     timeout: 30
     command: |
       set -eu
@@ -306,6 +319,7 @@ steps:
   - id: "save-original-implementer-session"
     condition: "{{task_already_done}} != 'true' and {{implementation_report.session_id_valid}} == 'true'"
     type: "bash"
+    cwd: "{{worktree_path}}"
     timeout: 10
     command: |
       set -eu
@@ -318,6 +332,7 @@ steps:
   - id: "initialize-review-resolution"
     condition: "{{task_already_done}} != 'true'"
     type: "bash"
+    cwd: "{{worktree_path}}"
     timeout: 30
     command: |
       set -eu
@@ -367,6 +382,7 @@ steps:
       # Every review round begins from the durable task base SHA through current HEAD.
       - id: "build-review-package"
         type: "bash"
+        cwd: "{{worktree_path}}"
         timeout: 30
         command: |
           set -eu
@@ -439,6 +455,7 @@ steps:
 
       - id: "analyze-review-verdict"
         type: "bash"
+        cwd: "{{worktree_path}}"
         timeout: 30
         command: |
           set -eu
@@ -469,6 +486,7 @@ steps:
 
       - id: "resolve-review-iteration"
         type: "bash"
+        cwd: "{{worktree_path}}"
         timeout: 30
         command: |
           set -eu
@@ -556,7 +574,7 @@ steps:
 
           delegate(
             session_id="{{original_implementer_session_id}}",
-            instruction="Fix only the load-bearing findings in this review, using this precomputed packet instead of re-running Git discovery: {{review_verdict}}\n\nREVIEW PACKAGE:\n{{review_package}}\n\nRerun the task's exact verification, commit, and return the full STATUS/SESSION_ID report.",
+            instruction="Work only inside {{worktree_path}}. Fix only the load-bearing findings in this review, using this precomputed packet instead of re-running Git discovery: {{review_verdict}}\n\nREVIEW PACKAGE:\n{{review_package}}\n\nRerun the task's exact verification, commit in that worktree, and return the full STATUS/SESSION_ID report.",
             model_role="{{current_task.implementation_model_role}}"
           )
 
@@ -578,6 +596,13 @@ steps:
         prompt: &escalated_fix_prompt |
           FRESH ESCALATED REVIEW FIX
           ==========================
+
+          EXECUTION ROOT
+          ==============
+          {{worktree_path}}
+
+          Run every filesystem, shell, verification, and Git operation inside this
+          exact worktree. Do not modify or commit in the parent checkout.
 
           TASK GOAL
           =========
@@ -649,6 +674,7 @@ steps:
       - id: "extract-fix-implementation-report"
         condition: "{{review_resolution.outcome}} == 'PENDING'"
         type: "bash"
+        cwd: "{{worktree_path}}"
         timeout: 30
         command: |
           set -eu
@@ -696,6 +722,7 @@ steps:
       - id: "resolve-fix-status"
         condition: "{{review_resolution.outcome}} == 'PENDING'"
         type: "bash"
+        cwd: "{{worktree_path}}"
         timeout: 30
         command: |
           set -eu
@@ -740,6 +767,7 @@ steps:
   - id: "stop-on-blocked-outcome"
     condition: "{{task_already_done}} != 'true' and {{review_resolution.outcome}} == 'BLOCKED'"
     type: "bash"
+    cwd: "{{worktree_path}}"
     timeout: 30
     command: |
       set -eu
@@ -754,6 +782,7 @@ steps:
   - id: "write-ledger-checkpoint"
     condition: "({{implementation_report.status}} == 'DONE' or {{implementation_report.status}} == 'DONE_WITH_CONCERNS') and ({{review_resolution.outcome}} == 'PASS' or {{review_resolution.outcome}} == 'APPROVED_WITH_PARKED') and {{review_resolution.no_load_bearing}} == 'true'"
     type: "bash"
+    cwd: "{{worktree_path}}"
     timeout: 30
     command: |
       set -eu

@@ -14,7 +14,7 @@
 
 name: "kenergy-full-development-cycle"
 description: "Complete development workflow with design and finish checkpoints around continuous VDD execution"
-version: "2.0.0"
+version: "2.0.1"
 author: "Kenergy Bundle"
 tags: ["workflow", "development", "vdd", "full-cycle", "continuous-execution", "holistic-review"]
 
@@ -252,11 +252,45 @@ stages:
           Report the full worktree path and branch name.
         output: "worktree_info"
 
-      # Read the plan
-      - id: "load-plan"
+      # Copy the approved plan into the worktree and resolve one execution target
+      - id: "prepare-execution-target"
         type: "bash"
         command: |
-          cat "{{project_path}}/{{paths.plan_path}}"
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+
+          project = Path(os.environ["PROJECT_PATH"]).expanduser().resolve()
+          worktree = (project / ".worktrees" / os.environ["FEATURE_SLUG"]).resolve()
+          source_plan = (project / os.environ["PLAN_PATH"]).resolve()
+          target_plan = (worktree / os.environ["PLAN_PATH"]).resolve()
+
+          if not worktree.is_dir():
+              raise SystemExit(f"BLOCKED: worktree not found: {worktree}")
+          if not source_plan.is_file():
+              raise SystemExit(f"BLOCKED: implementation plan not found: {source_plan}")
+
+          target_plan.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(source_plan, target_plan)
+          print(json.dumps({"path": str(worktree), "plan_path": os.environ["PLAN_PATH"]}))
+          PYEOF
+        env:
+          PROJECT_PATH: "{{project_path}}"
+          FEATURE_SLUG: "{{paths.feature_slug}}"
+          PLAN_PATH: "{{paths.plan_path}}"
+        parse_json: true
+        output: "execution_target"
+        timeout: 30
+
+      # Read the plan from the same worktree used for implementation and review
+      - id: "load-plan"
+        type: "bash"
+        cwd: "{{execution_target.path}}"
+        command: |
+          cat "{{execution_target.plan_path}}"
         output: "plan_doc"
         timeout: 30
 
@@ -265,42 +299,31 @@ stages:
         type: "recipe"
         recipe: "subagent-driven-development.yaml"
         context:
-          plan_path: "{{paths.plan_path}}"
+          plan_path: "{{execution_target.plan_path}}"
+          worktree_path: "{{execution_target.path}}"
         output: "implementation_result"
-        on_error: "continue"
 
-      # Debug handler for failures
-      - id: "check-for-errors"
+      # Require the sub-recipe's explicit success contract before review or finish
+      - id: "require-execution-complete"
         type: "bash"
+        cwd: "{{execution_target.path}}"
         command: |
-          if [ -n "{{implementation_result}}" ]; then
-            echo '{"has_error": false}'
-          else
-            echo '{"has_error": true}'
-          fi
-        parse_json: true
-        output: "error_check"
-        timeout: 30
+          set -eu
+          python3 - <<'PYEOF'
+          import os
 
-      - id: "debug-if-needed"
-        condition: "{{error_check.has_error}} == true"
-        agent: "foundation:bug-hunter"
-        model_role: "coding"
-        prompt: |
-          Implementation encountered an error. Debug and fix.
-          
-          Worktree: {{project_path}}/.worktrees/{{paths.feature_slug}}
-          
-          Follow systematic debugging:
-          1. Read error messages carefully
-          2. Identify root cause (don't guess)
-          3. Form hypothesis
-          4. Apply minimal fix
-          5. Verify fix works with real execution
-          
-          Report what was wrong and how you fixed it.
-        output: "debug_result"
-        on_error: "continue"
+          lines = os.environ.get("COMPLETION_REPORT", "").splitlines()
+          if not lines or lines[0] != "STATUS: ALL_TASKS_COMPLETE":
+              raise SystemExit(
+                  "BLOCKED: SDD did not return STATUS: ALL_TASKS_COMPLETE"
+              )
+          if len(lines) != 2 or not lines[1].startswith("LEDGER: "):
+              raise SystemExit("BLOCKED: SDD completion report is malformed")
+          print("SDD completion status validated.")
+          PYEOF
+        env:
+          COMPLETION_REPORT: "{{implementation_result.completion_report}}"
+        timeout: 30
 
       # Review the complete branch after continuous task execution
       - id: "review-branch"
@@ -309,9 +332,9 @@ stages:
         prompt: |
           Perform a holistic branch review after continuous plan execution.
 
-          Worktree: {{project_path}}/.worktrees/{{paths.feature_slug}}
+          Worktree: {{execution_target.path}}
           Plan: {{plan_doc}}
-          Continuous execution result: {{implementation_result}}
+          Continuous execution result: {{implementation_result.completion_report}}
 
           Review the entire changeset in the worktree, not individual task
           reviews. Assess cross-task integration, architectural consistency,
@@ -324,11 +347,11 @@ stages:
       # Present implementation for approval
       - id: "present-implementation"
         type: "bash"
+        cwd: "{{execution_target.path}}"
         command: |
-          cd "{{project_path}}/.worktrees/{{paths.feature_slug}}" && \
           echo "=== Implementation Summary ===" && \
           echo "Branch: {{paths.branch_name}}" && \
-          echo "Worktree: {{project_path}}/.worktrees/{{paths.feature_slug}}" && \
+          echo "Worktree: {{execution_target.path}}" && \
           echo "" && \
           echo "=== Changes ===" && \
           git diff --stat main 2>/dev/null || git diff --stat HEAD~5 2>/dev/null || echo "Unable to show diff" && \
@@ -383,7 +406,7 @@ stages:
           
           Action: {{finish_action.action}}
           Branch: {{paths.branch_name}}
-          Worktree: {{project_path}}/.worktrees/{{paths.feature_slug}}
+          Worktree: {{execution_target.path}}
           Feature: {{feature_name}}
           
           Based on the action:

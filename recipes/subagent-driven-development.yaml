@@ -20,12 +20,16 @@
 
 name: "subagent-driven-development"
 description: "Continuously execute an implementation plan after one conflict pre-flight, with merged review and plan-scoped ledger state"
-version: "4.1.0"
+version: "4.1.1"
 author: "Kenergy Bundle"
 tags: ["implementation", "subagent", "vdd", "merged-review", "continuous-execution", "foreach", "per-task-pipeline", "checkpoint", "ledger-state", "preflight"]
 
 context:
   plan_path: ""  # Required: Path to the implementation plan file
+  worktree_path: "."  # Execution root; defaults to the current project checkout
+  execution_root:
+    path: ""
+    plan_path: ""
 
 rate_limiting:
   max_concurrent_llm: 5
@@ -41,13 +45,56 @@ stages:
   - name: "task-execution"
     steps:
       # -----------------------------------------------------------------------
+      # Step 0: Resolve and validate the explicit execution root
+      # -----------------------------------------------------------------------
+      - id: "resolve-execution-root"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          root = Path(os.environ["WORKTREE_PATH"]).expanduser().resolve()
+          if not root.is_dir():
+              raise SystemExit(f"BLOCKED: execution root not found: {root}")
+
+          git_root = Path(
+              subprocess.check_output(
+                  ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+                  text=True,
+              ).strip()
+          ).resolve()
+          if git_root != root:
+              raise SystemExit(
+                  f"BLOCKED: execution root must be the Git worktree root: {root}"
+              )
+
+          raw_plan = Path(os.environ["PLAN_PATH"]).expanduser()
+          plan = raw_plan.resolve() if raw_plan.is_absolute() else (root / raw_plan).resolve()
+          if not plan.is_file():
+              raise SystemExit(f"BLOCKED: plan not found in execution root: {plan}")
+
+          print(json.dumps({"path": str(root), "plan_path": str(plan)}))
+          PYEOF
+        env:
+          WORKTREE_PATH: "{{worktree_path}}"
+          PLAN_PATH: "{{plan_path}}"
+        parse_json: true
+        output: "execution_root"
+
+      # -----------------------------------------------------------------------
       # Step 1: Load and Parse Implementation Plan
       # -----------------------------------------------------------------------
       - id: "load-plan"
         agent: "kenergy:plan-writer"
         model_role: "fast"
         prompt: |
-          Load the implementation plan from: {{plan_path}}
+          Load the implementation plan from: {{execution_root.plan_path}}
+          Execution root: {{execution_root.path}}
 
           Parse the plan and extract all implementation tasks as a structured list.
 
@@ -102,6 +149,7 @@ stages:
       # -----------------------------------------------------------------------
       - id: "validate-plan"
         type: "bash"
+        cwd: "{{execution_root.path}}"
         timeout: 30
         command: |
           python3 - << 'PYEOF'
@@ -206,6 +254,7 @@ stages:
       # -----------------------------------------------------------------------
       - id: "initialize-plan-state"
         type: "bash"
+        cwd: "{{execution_root.path}}"
         timeout: 30
         command: |
           set -eu
@@ -214,7 +263,7 @@ stages:
           import re
           from pathlib import Path
 
-          raw = Path("{{plan_path}}").expanduser()
+          raw = Path("{{execution_root.plan_path}}").expanduser()
           plan = raw.resolve()
           if not plan.is_file():
               raise SystemExit(f"BLOCKED: plan not found: {plan}")
@@ -259,6 +308,7 @@ stages:
       # -----------------------------------------------------------------------
       - id: "reconcile-plan-state"
         type: "bash"
+        cwd: "{{execution_root.path}}"
         timeout: 30
         command: |
           set -eu
@@ -317,10 +367,13 @@ stages:
         prompt: |
           Perform one pre-flight conflict scan before task execution.
 
-          Read the complete source plan at {{plan_path}}. Treat it as the
+          Read the complete source plan at {{execution_root.plan_path}}. Treat it as the
           authority for plan-wide requirements, including any Global Constraints
           and mandates. Cross-check it against the complete parsed task data and
           plan-scoped state below:
+
+          EXECUTION ROOT:
+          {{execution_root.path}}
 
           PARSED PLAN:
           {{plan_data}}
@@ -354,6 +407,7 @@ stages:
 
       - id: "gate-preflight-conflicts"
         type: "bash"
+        cwd: "{{execution_root.path}}"
         timeout: 30
         command: |
           python3 - <<'PYEOF'
@@ -440,6 +494,7 @@ stages:
         recipe: "single-task-pipeline.yaml"
         context:
           current_task: "{{current_task}}"
+          worktree_path: "{{execution_root.path}}"
           plan_identity: "{{plan_state.plan_identity}}"
           state_dir: "{{plan_state.state_dir}}"
           ledger_path: "{{plan_state.ledger_path}}"

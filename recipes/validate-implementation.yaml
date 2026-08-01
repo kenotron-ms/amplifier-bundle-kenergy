@@ -80,7 +80,53 @@ stages:
           max_delay: 60
 
       # -----------------------------------------------------------------------
-      # Step 2: Build One Read-Only Packet for the Externally Completed Range
+      # Step 2: Validate mandatory goals and review-role routing fail-closed
+      # -----------------------------------------------------------------------
+      - id: "validate-plan-data"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import os
+
+          raw = os.environ.get("PLAN_DATA", "null")
+          try:
+              data = json.loads(raw)
+          except json.JSONDecodeError as error:
+              raise SystemExit(f"BLOCKED: plan_data is not valid JSON: {error}") from error
+
+          if not isinstance(data, dict) or not isinstance(data.get("tasks"), list):
+              raise SystemExit("BLOCKED: plan_data must contain a tasks array")
+          if not data["tasks"]:
+              raise SystemExit("BLOCKED: plan_data.tasks is empty")
+
+          review_roles = {"fast", "critique", "reasoning"}
+          for index, task in enumerate(data["tasks"]):
+              if not isinstance(task, dict):
+                  raise SystemExit(
+                      f"BLOCKED: plan_data.tasks[{index}] must be an object"
+                  )
+              goal = task.get("goal")
+              if not isinstance(goal, str) or not goal.strip():
+                  raise SystemExit(
+                      f"BLOCKED: plan_data.tasks[{index}] goal must be a non-empty string"
+                  )
+              role = task.get("review_model_role")
+              if role not in review_roles:
+                  raise SystemExit(
+                      f"BLOCKED: plan_data.tasks[{index}] has invalid "
+                      f"review_model_role: {role!r}"
+                  )
+
+          print(f"plan_data validated: {len(data['tasks'])} task(s) ready for review")
+          PYEOF
+        env:
+          PLAN_DATA: "{{plan_data}}"
+
+      # -----------------------------------------------------------------------
+      # Step 3: Build One Read-Only Packet for the Externally Completed Range
       # -----------------------------------------------------------------------
       - id: "build-review-package"
         type: "bash"
@@ -125,7 +171,7 @@ stages:
         output: "review_package"
 
       # -----------------------------------------------------------------------
-      # Step 3: Per-Task Merged Review (Single Pass, No Fix Loop)
+      # Step 4: Per-Task Merged Review (Single Pass, No Fix Loop)
       # -----------------------------------------------------------------------
       - id: "per-task-validation"
         foreach: "{{plan_data.tasks}}"
@@ -194,7 +240,7 @@ stages:
         collect: "validation_results"
 
       # -----------------------------------------------------------------------
-      # Step 4: Summarize the Merged Three-Axis Verdicts
+      # Step 5: Summarize the Merged Three-Axis Verdicts
       # -----------------------------------------------------------------------
       - id: "validation-summary"
         agent: "kenergy:plan-writer"
