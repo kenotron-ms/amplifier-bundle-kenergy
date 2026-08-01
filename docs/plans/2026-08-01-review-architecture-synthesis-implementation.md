@@ -295,7 +295,7 @@ In `single-task-pipeline.yaml`, replace both global state filenames with those f
     if not slug:
         raise SystemExit("BLOCKED: task ID produced an empty slug")
 
-    state_dir = Path(os.environ["STATE_DIR"])
+    state_dir = Path(os.environ["STATE_DIR"]).expanduser()
     brief_path = state_dir / "task-briefs" / f"{slug}.md"
     base_path = state_dir / "task-briefs" / f"{slug}.base-sha"
     brief = """# Task Brief: {task_id}
