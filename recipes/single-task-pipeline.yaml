@@ -1,37 +1,53 @@
 # Single Task Pipeline
 # Per-task implementation pipeline extracted from subagent-driven-development.yaml
-# to enable bounded parallelism via foreach + type: recipe.
-#
-# This recipe executes: implement → status extract → review → checkpoint
-# for a single task. The parent recipe invokes it once per task.
+# to run one uniform implement -> packet review -> bounded fix -> ledger lifecycle.
 #
 # Context variables received from parent:
-#   current_task: The task object with task_id, description, spec, etc.
-#   plan_identity: Absolute path of the active implementation plan
-#   state_dir: Plan-scoped durable state directory
-#   ledger_path: Plan-scoped durable ledger
+#   current_task: The task object with task_id, description, spec, roles, and interfaces.
+#   plan_identity: Absolute path of the active implementation plan.
+#   state_dir: Plan-scoped durable state directory.
+#   ledger_path: Plan-scoped durable ledger.
 
 name: "single-task-pipeline"
-description: "Per-task implementation pipeline: implement → status extract → tiered review → checkpoint"
+description: "Per-task implementation pipeline: implement, packet-review, bounded fixes, and safe ledger completion"
 version: "1.0.0"
 author: "Kenergy Bundle"
-tags: ["implementation", "per-task", "pipeline", "vdd", "review"]
+tags: ["implementation", "per-task", "pipeline", "vdd", "packet-review", "bounded-fix"]
 
 context:
   current_task: {}
   plan_identity: ""
   state_dir: ""
   ledger_path: ""
-  # Pipeline variable defaults (prevent undefined variable errors)
-  impl_status: "SKIP"
-  review_tier: "trivial"
-  spec_approved: "true"
-  quality_approved: "true"
-  observation_notes: "(none)"
+  # Pipeline defaults keep every conditional path explicit and fail-closed.
   task_already_done: "false"
+  task_implementation: ""
+  original_implementer_session_id: ""
+  implementation_report:
+    status: "SKIP"
+    session_id: ""
+    session_id_valid: "false"
+    blocker: "implementation report has not been parsed"
+  review_verdict: ""
+  review_package: ""
+  review_evaluation:
+    exact_pass: "false"
+    no_load_bearing: "false"
+    load_bearing_remaining: "true"
+    advisory_findings: ""
+    load_bearing_findings: ""
+    unclassified_failure: "true"
+  review_resolution:
+    outcome: "PENDING"
+    no_load_bearing: "false"
+    terminal: "false"
+    round: "0"
+    advisory_findings: ""
+    blocker: ""
+  task_outcome: "ALREADY_COMPLETED"
 
 steps:
-  # --- 2.0a: Check durable plan-scoped task completion state ---
+  # --- 2.0a: Trust completion only when a safe ledger entry matches Git history ---
   - id: "check-task-complete"
     type: "bash"
     timeout: 30
@@ -55,27 +71,27 @@ steps:
           )
 
       task_id = os.environ["TASK_ID"].strip()
+      safe_outcomes = {"PASS", "APPROVED_WITH_PARKED"}
       entry_pattern = re.compile(
-          r"^- \[x\] (?P<task>.+?) — (?P<sha>[0-9a-f]+) — (?P<outcome>.+)$"
+          r"^- \[x\] (?P<task>.+?) — (?P<sha>[0-9a-f]{7,64}) — (?P<outcome>.+)$"
       )
-      ledger_shas = [
-          match.group("sha")
-          for line in lines
-          if (match := entry_pattern.match(line)) and match.group("task") == task_id
-      ]
-      log_prefixes = {
-          line.split(maxsplit=1)[0]
-          for line in subprocess.check_output(
-              ["git", "log", "--oneline"], text=True
-          ).splitlines()
-          if line.strip()
-      }
 
-      print(
-          "true"
-          if any(sha.startswith(prefix) for sha in ledger_shas for prefix in log_prefixes)
-          else "false"
-      )
+      for line in lines:
+          match = entry_pattern.match(line)
+          if not match or match.group("task") != task_id:
+              continue
+          if match.group("outcome") not in safe_outcomes:
+              continue
+          if subprocess.run(
+              ["git", "merge-base", "--is-ancestor", match.group("sha"), "HEAD"],
+              stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL,
+              check=False,
+          ).returncode == 0:
+              print("true")
+              break
+      else:
+          print("false")
       PYEOF
     env:
       TASK_ID: "{{current_task.task_id}}"
@@ -158,58 +174,44 @@ steps:
       cat "{{ledger_path}}"
     output: "project_brief"
 
-  # --- 2a: Implement the task ---
-  - id: "implement"
-    condition: "{{task_already_done}} != 'true'"
+  # --- 2a: Implement exactly one task with an explicit implementation role ---
+  - id: "implement-fast"
+    condition: "{{task_already_done}} != 'true' and {{current_task.implementation_model_role}} == 'fast'"
     agent: "kenergy:implementer"
-    prompt: |
-      SUBAGENT IMPLEMENTATION TASK
-      ============================
+    model_role: "fast"
+    prompt: &implementation_prompt |
+      IMPLEMENT ONE TASK
+      ==================
 
-      You are a fresh agent assigned to implement ONE specific task.
-      Focus ONLY on this task. Do not consider other tasks.
-
-      TASK TO IMPLEMENT:
+      TASK GOAL
+      =========
       Task ID: {{current_task.task_id}}
       Description: {{current_task.description}}
       Specification: {{current_task.spec}}
       Acceptance Criteria: {{current_task.acceptance_criteria}}
+      Interfaces: {{current_task.interfaces}}
       Files: {{current_task.files}}
 
-      PROJECT BRIEF (read-only reference from prior tasks):
+      PLAN-SCOPED PROJECT BRIEF
+      =========================
       {{project_brief}}
 
-      IMPLEMENTATION REQUIREMENTS (VDD — Verification Driven Development):
-      1. IMPLEMENT EXACTLY WHAT THE SPEC SAYS:
-         - Implement exactly what the spec says
-         - Do not add features not in the spec
-         - Do not skip any spec requirements
-      2. RUN STATIC ANALYSIS FIRST (always free, always fast):
-         - Run ruff, ty, tsc, oxlint — whatever applies to this codebase
-         - Fix anything it finds before proceeding
-      3. VERIFY WITH REAL EXECUTION:
-         - Use the verification method from the spec (curl, playwright-cli, run the script)
-         - If spec says curl the endpoint, make the curl call
-         - If spec says open the browser, use playwright-cli
-         - For library code, pytest is appropriate
-         - Do NOT substitute a mock-heavy unit test for a real execution check
-         - Document the ACTUAL output you saw (paste the real command output)
-      4. COMMIT YOUR CHANGES
+      Implement exactly this task and nothing else. Run the task's exact static
+      analysis and VDD verification commands, record the actual output, and make
+      one atomic commit. Do not substitute a string-presence check for behavioral
+      proof. Do not push, merge, open a PR, or deploy.
 
-      OUTPUT FORMAT (first line MUST be the status):
+      RESPONSE CONTRACT
+      =================
       STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
-      - task_id: {{current_task.task_id}}
-      - files_changed: [list of files created/modified]
-      - static_analysis: [ruff/ty/tsc results]
-      - verification_method: [what was run — curl/pytest/playwright-cli/etc]
-      - verification_output: [actual output from the verification command]
-      - concerns: (if DONE_WITH_CONCERNS, list specific concerns here)
-      - blocker: (if BLOCKED, describe what prevents completion)
-
-      Use STATUS: DONE when task is complete, verified with real execution, and committed.
-      Use STATUS: DONE_WITH_CONCERNS when complete but you noticed issues worth flagging.
-      Use STATUS: BLOCKED when you cannot proceed (missing dependency, failing prereq, server not running).
-      Use STATUS: NEEDS_CONTEXT when you need information not provided.
+      SESSION_ID: Copy the full Session ID from your injected environment context.
+      TASK_ID: {{current_task.task_id}}
+      FILES_CHANGED: list exact paths
+      STATIC_ANALYSIS: exact command and output
+      VERIFICATION: exact command, expected result, and actual output
+      COMMIT: full commit hash and subject
+      CONCERNS: NONE or specific concerns
+      BLOCKER: NONE or the exact blocker
     output: "task_implementation"
     timeout: 3600
     retry:
@@ -218,286 +220,179 @@ steps:
       initial_delay: 5
       max_delay: 120
 
-  # --- 2a.1: Extract implementer status ---
-  - id: "extract-status"
-    condition: "{{task_already_done}} != 'true'"
-    type: "bash"
-    timeout: 30
-    command: |
-      STATUS=$(cat <<'STATUS_DELIM' | grep -m1 '^STATUS:' | sed 's/^STATUS:[[:space:]]*//' | tr -d '[:space:]'
-      {{task_implementation}}
-      STATUS_DELIM
-      )
-      if [ -z "$STATUS" ]; then
-        echo "DONE"
-      else
-        echo "$STATUS"
-      fi
-    output: "impl_status"
-
-  # --- 2a.2: BLOCKED → immediate human flag ---
-  - id: "blocked-flag"
-    condition: "{{impl_status}} == 'BLOCKED'"
-    agent: "kenergy:plan-writer"
-    timeout: 120
-    model_role: "fast"
-    prompt: |
-      BLOCKED TASK — HUMAN INTERVENTION NEEDED
-      ==========================================
-      Task {{current_task.task_id}} reported BLOCKED status.
-
-      IMPLEMENTER REPORT:
-      {{task_implementation}}
-
-      Format a clear, concise summary of:
-      1. Which task is blocked (task_id and description)
-      2. What the specific blocker is
-      3. What information or action the human needs to provide
-
-      This is a flag for the human operator — keep it short and actionable.
-    output: "blocked_flag"
-
-  # --- 2a.3: Extract concerns if DONE_WITH_CONCERNS ---
-  - id: "extract-concerns"
-    condition: "{{impl_status}} == 'DONE_WITH_CONCERNS'"
-    type: "bash"
-    timeout: 30
-    command: |
-      cat <<'CONCERN_DELIM' | sed -n '/[Cc]oncern/,/^[A-Z][A-Z]/p' | head -30
-      {{task_implementation}}
-      CONCERN_DELIM
-    output: "observation_notes"
-
-  # --- 2a.4: Classify task complexity for tiered review ---
-  - id: "classify-tier"
-    condition: "{{impl_status}} != 'BLOCKED' and {{impl_status}} != 'SKIP'"
-    type: "bash"
-    timeout: 30
-    command: |
-      FILE_COUNT=$(cat <<'FILES_DELIM' | python3 -c "
-      import json, sys
-      data = sys.stdin.read().strip()
-      try:
-          files = json.loads(data)
-          print(len(files) if isinstance(files, list) else 1)
-      except Exception:
-          print(len([l for l in data.splitlines() if l.strip()]))
-      "
-      {{current_task.files}}
-      FILES_DELIM
-      )
-      SPEC_WORDS=$(cat <<'SPEC_DELIM' | wc -w
-      {{current_task.spec}}
-      SPEC_DELIM
-      )
-      if [ "$FILE_COUNT" -le 1 ] && [ "$SPEC_WORDS" -lt 50 ]; then
-        echo "trivial"
-      elif [ "$FILE_COUNT" -le 5 ]; then
-        echo "standard"
-      else
-        echo "complex"
-      fi
-    output: "review_tier"
-
-  # --- 2b: Verification review loop (for complex tasks) ---
-  - id: "spec-review-loop"
-    condition: "{{impl_status}} != 'BLOCKED' and {{review_tier}} == 'complex'"
-    while_condition: "true"
-    break_when: "{{spec_approved}} == 'true'"
-    max_while_iterations: 3
-    steps:
-      - id: "spec-review"
-        agent: "kenergy:verifier"
-        prompt: |
-          VERIFICATION REVIEW
-          ===================
-          Review Stage 1 of 2: Verify implementation matches specification AND real execution was performed.
-
-          TASK SPEC:
-          Task ID: {{current_task.task_id}}
-          Description: {{current_task.description}}
-          Specification: {{current_task.spec}}
-          Acceptance Criteria: {{current_task.acceptance_criteria}}
-          Files: {{current_task.files}}
-
-          IMPLEMENTATION RESULT:
-          {{task_implementation}}
-
-          YOUR MISSION:
-          1. Read the ACTUAL CODE (do not trust the implementation report)
-          2. Compare every spec requirement against what was implemented
-          3. Verify static analysis was run and clean
-          4. Check that real execution was performed — not just mock-heavy unit tests for non-library code
-          5. Confirm actual output is documented
-
-          VDD CHECK: Was the verification method appropriate?
-          - API endpoint → curl/HTTP call against running server
-          - UI change → browser open with playwright-cli
-          - Library code → pytest is acceptable
-          - Script/CLI → actually executed
-
-          VERDICT FORMAT:
-          End your review with exactly one of:
-          - "VERDICT: APPROVED" — spec fully implemented, real execution verified
-          - "VERDICT: NEEDS CHANGES — [list specific issues]"
-
-          REVIEW CALIBRATION:
-          If this is a re-review, focus on whether the SPECIFIC ISSUES from the previous review were addressed.
-          Do not introduce new stylistic concerns on re-review — only flag functional spec violations or
-          verification gaps that remain unresolved.
-
-          IMPLEMENTER OBSERVATIONS:
-          {{observation_notes}}
-        output: "spec_verdict"
-        timeout: 600
-        retry:
-          max_attempts: 3
-          backoff: exponential
-          initial_delay: 5
-          max_delay: 120
-
-      - id: "extract-spec-verdict"
-        type: "bash"
-        timeout: 30
-        command: |
-          if cat <<'VERDICT_DELIM' | grep -q "VERDICT: APPROVED"
-          {{spec_verdict}}
-          VERDICT_DELIM
-          then
-            echo "true"
-          else
-            echo "false"
-          fi
-        output: "spec_approved"
-
-      - id: "spec-fix"
-        condition: "{{spec_approved}} == 'false'"
-        agent: "kenergy:implementer"
-        prompt: |
-          VERIFICATION FIX (Iteration {{_loop_iteration}} of 3)
-          ======================================================
-          The verifier found issues with your implementation.
-          This is review-fix iteration {{_loop_iteration}} of a maximum 3.
-          After 3 attempts, remaining issues will be flagged for human review.
-
-          REVIEW FEEDBACK:
-          {{spec_verdict}}
-
-          ORIGINAL TASK:
-          Task ID: {{current_task.task_id}}
-          Specification: {{current_task.spec}}
-          Files: {{current_task.files}}
-
-          Focus on the MOST CRITICAL issues first. Fix ONLY the issues identified.
-          If the feedback says real execution wasn't performed, run the actual thing — curl, playwright-cli, script execution.
-          Do not add anything else. Commit your changes.
-
-          Return updated implementation results.
-        output: "task_implementation"
-        timeout: 3600
-        retry:
-          max_attempts: 3
-          backoff: exponential
-          initial_delay: 5
-          max_delay: 120
-
-  # --- 2b.1: Check if spec review exhausted without approval ---
-  - id: "check-spec-resolution"
-    condition: "{{spec_approved}} == 'false'"
-    agent: "kenergy:plan-writer"
-    timeout: 120
-    model_role: "fast"
-    prompt: |
-      WARNING: Verification review loop exhausted after 3 iterations without approval.
-      Task: {{current_task.task_id}} — {{current_task.description}}
-      Last verdict: {{spec_verdict}}
-
-      Flag this task as having unresolved verification issues. Include this warning
-      in the task summary so the human reviewer is aware during the approval gate.
-    output: "spec_unresolved"
-
-  # --- 2b.2: Combined spec+quality review for standard tier ---
-  - id: "combined-review"
-    condition: "{{review_tier}} == 'standard'"
-    agent: "kenergy:code-reviewer"
-    timeout: 600
+  - id: "implement-coding"
+    condition: "{{task_already_done}} != 'true' and {{current_task.implementation_model_role}} == 'coding'"
+    agent: "kenergy:implementer"
+    model_role: "coding"
+    prompt: *implementation_prompt
+    output: "task_implementation"
+    timeout: 3600
     retry:
       max_attempts: 3
       backoff: exponential
       initial_delay: 5
       max_delay: 120
-    prompt: |
-      COMBINED VERIFICATION + QUALITY REVIEW (Standard Tier)
-      =======================================================
-      This task has moderate complexity. Perform a single combined review
-      covering both spec compliance/verification AND code quality.
 
-      TASK SPEC:
-      Task ID: {{current_task.task_id}}
-      Description: {{current_task.description}}
-      Specification: {{current_task.spec}}
-      Acceptance Criteria: {{current_task.acceptance_criteria}}
-      Files: {{current_task.files}}
+  - id: "implement-reasoning"
+    condition: "{{task_already_done}} != 'true' and {{current_task.implementation_model_role}} == 'reasoning'"
+    agent: "kenergy:implementer"
+    model_role: "reasoning"
+    prompt: *implementation_prompt
+    output: "task_implementation"
+    timeout: 3600
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      initial_delay: 5
+      max_delay: 120
 
-      IMPLEMENTATION RESULT:
-      {{task_implementation}}
+  # --- 2a.1: Parse the report fail-closed and retain the original child session ---
+  - id: "extract-initial-implementation-report"
+    condition: "{{task_already_done}} != 'true'"
+    type: "bash"
+    timeout: 30
+    command: |
+      set -eu
+      python3 - <<'PYEOF'
+      import json
+      import os
+      import re
 
-      IMPLEMENTER OBSERVATIONS:
-      {{observation_notes}}
+      raw = os.environ.get("IMPLEMENTATION_OUTPUT", "")
+      status_matches = re.findall(
+          r"(?m)^STATUS:[ \t]*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)[ \t]*$",
+          raw,
+      )
+      session_matches = re.findall(r"(?m)^SESSION_ID:[ \t]*([^\s]+)[ \t]*$", raw)
+      session_id = session_matches[0] if len(session_matches) == 1 else ""
+      session_id_valid = bool(
+          re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{15,}", session_id)
+      )
 
-      YOUR MISSION:
-      1. Read the ACTUAL CODE (do not trust the implementation report)
-      2. Run static analysis if applicable
-      3. Check spec compliance: all requirements implemented, nothing extra
-      4. Check VDD compliance: was real execution performed and documented?
-      5. Check code quality: clean code, error handling, maintainability
+      blocker = ""
+      if len(status_matches) != 1:
+          status = "BLOCKED"
+          blocker = "missing or ambiguous STATUS line in implementer response"
+      else:
+          status = status_matches[0]
 
-      VERDICT FORMAT:
-      End your review with exactly one of:
-      - "VERDICT: APPROVED" — spec compliant, verified, quality acceptable
-      - "VERDICT: NEEDS CHANGES — [list specific issues]"
+      if not session_id_valid:
+          status = "BLOCKED"
+          blocker = "missing or invalid full SESSION_ID in implementer response"
+      elif status not in {"DONE", "DONE_WITH_CONCERNS"}:
+          blocker = "implementer did not report a completed task"
 
-      Only critical and major issues require NEEDS CHANGES.
-      Minor style preferences do NOT block approval.
-    output: "combined_verdict"
+      print(json.dumps({
+          "status": status,
+          "session_id": session_id,
+          "session_id_valid": "true" if session_id_valid else "false",
+          "blocker": blocker,
+      }))
+      PYEOF
+    env:
+      IMPLEMENTATION_OUTPUT: "{{task_implementation}}"
+    parse_json: true
+    output: "implementation_report"
 
-  # --- 2c: Code quality review loop ---
-  - id: "quality-review-loop"
-    condition: "{{impl_status}} != 'BLOCKED' and {{review_tier}} == 'complex'"
+  - id: "save-original-implementer-session"
+    condition: "{{task_already_done}} != 'true' and {{implementation_report.session_id_valid}} == 'true'"
+    type: "bash"
+    timeout: 10
+    command: |
+      set -eu
+      test -n "$SESSION_ID"
+      printf '%s\n' "$SESSION_ID"
+    env:
+      SESSION_ID: "{{implementation_report.session_id}}"
+    output: "original_implementer_session_id"
+
+  - id: "initialize-review-resolution"
+    condition: "{{task_already_done}} != 'true'"
+    type: "bash"
+    timeout: 30
+    command: |
+      set -eu
+      python3 - <<'PYEOF'
+      import json
+      import os
+
+      status = os.environ["IMPLEMENTATION_STATUS"]
+      session_valid = os.environ["SESSION_ID_VALID"] == "true"
+      blocker = os.environ["IMPLEMENTATION_BLOCKER"].strip()
+      if status in {"DONE", "DONE_WITH_CONCERNS"} and session_valid:
+          resolution = {
+              "outcome": "PENDING",
+              "no_load_bearing": "false",
+              "terminal": "false",
+              "round": "0",
+              "advisory_findings": "",
+              "blocker": "",
+          }
+      else:
+          resolution = {
+              "outcome": "BLOCKED",
+              "no_load_bearing": "false",
+              "terminal": "true",
+              "round": "0",
+              "advisory_findings": "",
+              "blocker": blocker or "implementation did not produce a resumable completed report",
+          }
+      print(json.dumps(resolution))
+      PYEOF
+    env:
+      IMPLEMENTATION_STATUS: "{{implementation_report.status}}"
+      SESSION_ID_VALID: "{{implementation_report.session_id_valid}}"
+      IMPLEMENTATION_BLOCKER: "{{implementation_report.blocker}}"
+    parse_json: true
+    output: "review_resolution"
+
+  # --- 2b: Uniform five-round packet review and bounded remediation lifecycle ---
+  - id: "review-fix-loop"
+    condition: "{{task_already_done}} != 'true' and {{review_resolution.outcome}} == 'PENDING'"
     while_condition: "true"
-    break_when: "{{quality_approved}} == 'true'"
-    max_while_iterations: 3
+    break_when: "{{review_resolution.terminal}} == 'true'"
+    max_while_iterations: 5
     steps:
-      - id: "quality-review"
-        agent: "kenergy:quality-reviewer"
-        prompt: |
-          CODE QUALITY REVIEW
-          ===================
-          Review Stage 2 of 2: Verify code quality and best practices.
-          Verification compliance has already been checked.
+      # Every review round begins from the durable task base SHA through current HEAD.
+      - id: "build-review-package"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+          BASE_SHA=$(cat "{{task_state.task_base_sha_path}}")
+          HEAD_SHA=$(git rev-parse HEAD)
+          PACKAGE="{{state_dir}}/review-packages/{{task_state.task_slug}}-round-{{_loop_iteration}}.md"
+          {
+            printf '# Review Package\n\n'
+            printf 'Base: %s\nHead: %s\n\n' "$BASE_SHA" "$HEAD_SHA"
+            printf '## Diff Stat\n\n```text\n'
+            git diff --stat "$BASE_SHA..$HEAD_SHA"
+            printf '```\n\n## Commits\n\n```text\n'
+            git log --oneline "$BASE_SHA..$HEAD_SHA"
+            printf '```\n\n## Diff\n\n```diff\n'
+            git diff "$BASE_SHA..$HEAD_SHA" --
+            printf '```\n'
+          } > "$PACKAGE"
+          cat "$PACKAGE"
+        output: "review_package"
 
-          TASK:
+      - id: "review-fast"
+        condition: "{{current_task.review_model_role}} == 'fast'"
+        agent: "kenergy:reviewer"
+        model_role: "fast"
+        prompt: &review_prompt |
+          TASK GOAL
+          =========
           Task ID: {{current_task.task_id}}
           Description: {{current_task.description}}
-          Files: {{current_task.files}}
+          Specification: {{current_task.spec}}
+          Acceptance Criteria: {{current_task.acceptance_criteria}}
+          Interfaces: {{current_task.interfaces}}
 
-          IMPLEMENTATION:
-          {{task_implementation}}
-
-          YOUR MISSION:
-          1. Read the ACTUAL CODE
-          2. Run static analysis if applicable
-          3. Check: clean code, DRY, error handling, maintainability, no YAGNI violations
-          4. Do NOT change spec behavior — only evaluate quality
-
-          VERDICT FORMAT:
-          End your review with exactly one of:
-          - "VERDICT: APPROVED" — code quality meets standards
-          - "VERDICT: NEEDS CHANGES — [list specific issues by severity]"
-
-          Minor/suggestion issues do NOT block approval.
-          Only critical and major issues require NEEDS CHANGES.
-        output: "quality_verdict"
+          REVIEW PACKAGE
+          ==============
+          {{review_package}}
+        output: "review_verdict"
         timeout: 600
         retry:
           max_attempts: 3
@@ -505,43 +400,154 @@ steps:
           initial_delay: 5
           max_delay: 120
 
-      - id: "extract-quality-verdict"
+      - id: "review-critique"
+        condition: "{{current_task.review_model_role}} == 'critique'"
+        agent: "kenergy:reviewer"
+        model_role: "critique"
+        prompt: *review_prompt
+        output: "review_verdict"
+        timeout: 600
+        retry:
+          max_attempts: 3
+          backoff: exponential
+          initial_delay: 5
+          max_delay: 120
+
+      - id: "review-reasoning"
+        condition: "{{current_task.review_model_role}} == 'reasoning'"
+        agent: "kenergy:reviewer"
+        model_role: "reasoning"
+        prompt: *review_prompt
+        output: "review_verdict"
+        timeout: 600
+        retry:
+          max_attempts: 3
+          backoff: exponential
+          initial_delay: 5
+          max_delay: 120
+
+      - id: "analyze-review-verdict"
         type: "bash"
         timeout: 30
         command: |
-          if cat <<'VERDICT_DELIM' | grep -q "VERDICT: APPROVED"
-          {{quality_verdict}}
-          VERDICT_DELIM
-          then
-            echo "true"
-          else
-            echo "false"
-          fi
-        output: "quality_approved"
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import os
 
-      - id: "quality-fix"
-        condition: "{{quality_approved}} == 'false'"
-        agent: "kenergy:implementer"
+          lines = os.environ.get("REVIEW_VERDICT", "").splitlines()
+          exact_pass = any(line == "REVIEW: PASS" for line in lines)
+          load_bearing = [line.strip() for line in lines if "[LOAD-BEARING]" in line]
+          advisory = [line.strip() for line in lines if "[ADVISORY]" in line]
+          unclassified_failure = not exact_pass and not load_bearing and not advisory
+          no_load_bearing = not load_bearing and not unclassified_failure
+
+          print(json.dumps({
+              "exact_pass": "true" if exact_pass else "false",
+              "no_load_bearing": "true" if no_load_bearing else "false",
+              "load_bearing_remaining": "false" if no_load_bearing else "true",
+              "advisory_findings": "\n".join(advisory),
+              "load_bearing_findings": "\n".join(load_bearing),
+              "unclassified_failure": "true" if unclassified_failure else "false",
+          }))
+          PYEOF
+        env:
+          REVIEW_VERDICT: "{{review_verdict}}"
+        parse_json: true
+        output: "review_evaluation"
+
+      - id: "resolve-review-iteration"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import os
+
+          exact_pass = os.environ["EXACT_PASS"] == "true"
+          no_load_bearing = os.environ["NO_LOAD_BEARING"] == "true"
+          round_number = int(os.environ["ROUND"])
+          advisory_findings = os.environ["ADVISORY_FINDINGS"].strip()
+          load_bearing_findings = os.environ["LOAD_BEARING_FINDINGS"].strip()
+          unclassified_failure = os.environ["UNCLASSIFIED_FAILURE"] == "true"
+
+          if exact_pass and no_load_bearing:
+              resolution = {
+                  "outcome": "PASS",
+                  "no_load_bearing": "true",
+                  "terminal": "true",
+                  "round": str(round_number),
+                  "advisory_findings": "",
+                  "blocker": "",
+              }
+          elif exact_pass:
+              resolution = {
+                  "outcome": "BLOCKED",
+                  "no_load_bearing": "false",
+                  "terminal": "true",
+                  "round": str(round_number),
+                  "advisory_findings": advisory_findings,
+                  "blocker": "review reported REVIEW: PASS while retaining [LOAD-BEARING] findings",
+              }
+          elif round_number >= 5 and no_load_bearing:
+              resolution = {
+                  "outcome": "APPROVED_WITH_PARKED",
+                  "no_load_bearing": "true",
+                  "terminal": "true",
+                  "round": str(round_number),
+                  "advisory_findings": advisory_findings,
+                  "blocker": "",
+              }
+          elif round_number >= 5:
+              blocker = load_bearing_findings
+              if not blocker and unclassified_failure:
+                  blocker = "review failed without classified [LOAD-BEARING] or [ADVISORY] findings"
+              resolution = {
+                  "outcome": "BLOCKED",
+                  "no_load_bearing": "false",
+                  "terminal": "true",
+                  "round": str(round_number),
+                  "advisory_findings": advisory_findings,
+                  "blocker": blocker or "load-bearing review findings remain after bounded review",
+              }
+          else:
+              resolution = {
+                  "outcome": "PENDING",
+                  "no_load_bearing": "false",
+                  "terminal": "false",
+                  "round": str(round_number),
+                  "advisory_findings": advisory_findings,
+                  "blocker": "",
+              }
+          print(json.dumps(resolution))
+          PYEOF
+        env:
+          EXACT_PASS: "{{review_evaluation.exact_pass}}"
+          NO_LOAD_BEARING: "{{review_evaluation.no_load_bearing}}"
+          ROUND: "{{_loop_iteration}}"
+          ADVISORY_FINDINGS: "{{review_evaluation.advisory_findings}}"
+          LOAD_BEARING_FINDINGS: "{{review_evaluation.load_bearing_findings}}"
+          UNCLASSIFIED_FAILURE: "{{review_evaluation.unclassified_failure}}"
+        parse_json: true
+        output: "review_resolution"
+
+      # Rounds 1-3 resume only the original implementer; no fresh replacement is allowed.
+      - id: "resume-original-implementer"
+        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} <= 3"
+        agent: "kenergy:plan-writer"
+        model_role: "fast"
         prompt: |
-          CODE QUALITY FIX (Iteration {{_loop_iteration}} of 3)
-          ======================================================
-          The code quality reviewer found issues.
-          This is review-fix iteration {{_loop_iteration}} of a maximum 3.
-          After 3 attempts, remaining issues will be flagged for human review.
+          Call delegate exactly once to resume the original implementer:
 
-          REVIEW FEEDBACK:
-          {{quality_verdict}}
+          delegate(
+            session_id="{{original_implementer_session_id}}",
+            instruction="Fix only the load-bearing findings in this review, using this precomputed packet instead of re-running Git discovery: {{review_verdict}}\n\nREVIEW PACKAGE:\n{{review_package}}\n\nRerun the task's exact verification, commit, and return the full STATUS/SESSION_ID report.",
+            model_role="{{current_task.implementation_model_role}}"
+          )
 
-          ORIGINAL TASK:
-          Task ID: {{current_task.task_id}}
-          Specification: {{current_task.spec}}
-          Files: {{current_task.files}}
-
-          Focus on CRITICAL and IMPORTANT issues only. Minor suggestions do not
-          block approval. Fix ONLY the quality issues identified. Do NOT change
-          spec behavior. Run static analysis after fixing. Commit your changes.
-
-          Return updated implementation results.
+          Return the delegate result verbatim. Do not edit files yourself. If resume fails,
+          return STATUS: BLOCKED with the exact error.
         output: "task_implementation"
         timeout: 3600
         retry:
@@ -550,24 +556,189 @@ steps:
           initial_delay: 5
           max_delay: 120
 
-  # --- 2c.1: Check if quality review exhausted without approval ---
-  - id: "check-quality-resolution"
-    condition: "{{quality_approved}} == 'false'"
-    agent: "kenergy:plan-writer"
-    timeout: 120
-    model_role: "fast"
-    prompt: |
-      WARNING: Quality review loop exhausted after 3 iterations without approval.
-      Task: {{current_task.task_id}} — {{current_task.description}}
-      Last quality verdict: {{quality_verdict}}
+      # Rounds 4-5 use a fresh escalated implementer only after the original session budget.
+      - id: "escalate-implementer-coding"
+        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{current_task.escalated_model_role}} == 'coding'"
+        agent: "kenergy:implementer"
+        model_role: "coding"
+        prompt: &escalated_fix_prompt |
+          FRESH ESCALATED REVIEW FIX
+          ==========================
 
-      Flag this task as having unresolved quality issues. Include this warning
-      in the task summary so the human reviewer is aware during the approval gate.
-    output: "quality_unresolved"
+          TASK GOAL
+          =========
+          Task ID: {{current_task.task_id}}
+          Description: {{current_task.description}}
+          Specification: {{current_task.spec}}
+          Acceptance Criteria: {{current_task.acceptance_criteria}}
+          Interfaces: {{current_task.interfaces}}
+          Files: {{current_task.files}}
 
-  # --- 2d: Write plan-scoped ledger checkpoint after successful task completion ---
+          REVIEW PACKAGE
+          ==============
+          {{review_package}}
+
+          OPEN FINDINGS
+          =============
+          {{review_verdict}}
+
+          Fix only the open load-bearing findings. Do not add scope, redo Git
+          discovery, push, merge, open a PR, or deploy. Rerun the task's exact
+          static analysis and VDD verification, make one atomic commit, and return
+          the complete response contract below.
+
+          RESPONSE CONTRACT
+          =================
+          STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+          SESSION_ID: Copy the full Session ID from your injected environment context.
+          TASK_ID: {{current_task.task_id}}
+          FILES_CHANGED: list exact paths
+          STATIC_ANALYSIS: exact command and output
+          VERIFICATION: exact command, expected result, and actual output
+          COMMIT: full commit hash and subject
+          CONCERNS: NONE or specific concerns
+          BLOCKER: NONE or the exact blocker
+        output: "task_implementation"
+        timeout: 3600
+        retry:
+          max_attempts: 3
+          backoff: exponential
+          initial_delay: 5
+          max_delay: 120
+
+      - id: "escalate-implementer-reasoning"
+        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{current_task.escalated_model_role}} == 'reasoning'"
+        agent: "kenergy:implementer"
+        model_role: "reasoning"
+        prompt: *escalated_fix_prompt
+        output: "task_implementation"
+        timeout: 3600
+        retry:
+          max_attempts: 3
+          backoff: exponential
+          initial_delay: 5
+          max_delay: 120
+
+      - id: "escalate-implementer-critical-ops"
+        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{current_task.escalated_model_role}} == 'critical-ops'"
+        agent: "kenergy:implementer"
+        model_role: "critical-ops"
+        prompt: *escalated_fix_prompt
+        output: "task_implementation"
+        timeout: 3600
+        retry:
+          max_attempts: 3
+          backoff: exponential
+          initial_delay: 5
+          max_delay: 120
+
+      - id: "extract-fix-implementation-report"
+        condition: "{{review_resolution.outcome}} == 'PENDING'"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+
+          raw = os.environ.get("IMPLEMENTATION_OUTPUT", "")
+          status_matches = re.findall(
+              r"(?m)^STATUS:[ \t]*(DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT)[ \t]*$",
+              raw,
+          )
+          session_matches = re.findall(r"(?m)^SESSION_ID:[ \t]*([^\s]+)[ \t]*$", raw)
+          session_id = session_matches[0] if len(session_matches) == 1 else ""
+          session_id_valid = bool(
+              re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{15,}", session_id)
+          )
+
+          blocker = ""
+          if len(status_matches) != 1:
+              status = "BLOCKED"
+              blocker = "missing or ambiguous STATUS line in implementer fix response"
+          else:
+              status = status_matches[0]
+
+          if not session_id_valid:
+              status = "BLOCKED"
+              blocker = "missing or invalid full SESSION_ID in implementer fix response"
+          elif status not in {"DONE", "DONE_WITH_CONCERNS"}:
+              blocker = "implementer fix did not report a completed task"
+
+          print(json.dumps({
+              "status": status,
+              "session_id": session_id,
+              "session_id_valid": "true" if session_id_valid else "false",
+              "blocker": blocker,
+          }))
+          PYEOF
+        env:
+          IMPLEMENTATION_OUTPUT: "{{task_implementation}}"
+        parse_json: true
+        output: "implementation_report"
+
+      - id: "resolve-fix-status"
+        condition: "{{review_resolution.outcome}} == 'PENDING'"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import os
+
+          status = os.environ["IMPLEMENTATION_STATUS"]
+          session_valid = os.environ["SESSION_ID_VALID"] == "true"
+          blocker = os.environ["IMPLEMENTATION_BLOCKER"].strip()
+          round_number = os.environ["ROUND"]
+          if status in {"DONE", "DONE_WITH_CONCERNS"} and session_valid:
+              resolution = {
+                  "outcome": "PENDING",
+                  "no_load_bearing": "false",
+                  "terminal": "false",
+                  "round": round_number,
+                  "advisory_findings": "",
+                  "blocker": "",
+              }
+          else:
+              resolution = {
+                  "outcome": "BLOCKED",
+                  "no_load_bearing": "false",
+                  "terminal": "true",
+                  "round": round_number,
+                  "advisory_findings": "",
+                  "blocker": blocker or "fix attempt did not produce a resumable completed report",
+              }
+          print(json.dumps(resolution))
+          PYEOF
+        env:
+          IMPLEMENTATION_STATUS: "{{implementation_report.status}}"
+          SESSION_ID_VALID: "{{implementation_report.session_id_valid}}"
+          IMPLEMENTATION_BLOCKER: "{{implementation_report.blocker}}"
+          ROUND: "{{_loop_iteration}}"
+        parse_json: true
+        output: "review_resolution"
+
+  # A blocked initial report, bad session ID, failed resume, or fifth load-bearing
+  # review is terminal and must never write a ledger completion entry.
+  - id: "stop-on-blocked-outcome"
+    condition: "{{task_already_done}} != 'true' and {{review_resolution.outcome}} == 'BLOCKED'"
+    type: "bash"
+    timeout: 30
+    command: |
+      set -eu
+      printf 'BLOCKED: task %s — %s\n' "$TASK_ID" "$BLOCKER"
+      exit 1
+    env:
+      TASK_ID: "{{current_task.task_id}}"
+      BLOCKER: "{{review_resolution.blocker}}"
+
+  # Ledger completion is possible only after a completed implementation and a
+  # safe terminal review result with no load-bearing finding remaining.
   - id: "write-ledger-checkpoint"
-    condition: "{{impl_status}} == 'DONE' or {{impl_status}} == 'DONE_WITH_CONCERNS'"
+    condition: "({{implementation_report.status}} == 'DONE' or {{implementation_report.status}} == 'DONE_WITH_CONCERNS') and ({{review_resolution.outcome}} == 'PASS' or {{review_resolution.outcome}} == 'APPROVED_WITH_PARKED') and {{review_resolution.no_load_bearing}} == 'true'"
     type: "bash"
     timeout: 30
     command: |
@@ -582,35 +753,71 @@ steps:
       base_path = Path(os.environ["TASK_BASE_SHA_PATH"]).expanduser()
       task_id = os.environ["TASK_ID"].strip()
       task_slug = os.environ["TASK_SLUG"]
+      status = os.environ["IMPLEMENTATION_STATUS"]
+      outcome = os.environ["REVIEW_OUTCOME"]
+      no_load_bearing = os.environ["NO_LOAD_BEARING"] == "true"
+      round_number = os.environ["REVIEW_ROUND"]
+      advisory_findings = os.environ["ADVISORY_FINDINGS"]
       expected_first_line = f"# Plan: {os.environ['PLAN_IDENTITY']}"
 
+      if status not in {"DONE", "DONE_WITH_CONCERNS"}:
+          raise SystemExit("BLOCKED: refusing ledger write for incomplete task status")
+      if outcome not in {"PASS", "APPROVED_WITH_PARKED"}:
+          raise SystemExit("BLOCKED: refusing ledger write for unsafe review outcome")
+      if not no_load_bearing:
+          raise SystemExit("BLOCKED: refusing ledger write while load-bearing findings remain")
       if not ledger.is_file():
           raise SystemExit(f"BLOCKED: ledger not found: {ledger}")
+
       lines = ledger.read_text(encoding="utf-8").splitlines()
       if not lines or lines[0] != expected_first_line:
-          raise SystemExit(
-              "BLOCKED: ledger identity mismatch; refusing cross-plan state"
-          )
+          raise SystemExit("BLOCKED: ledger identity mismatch; refusing cross-plan state")
       if not brief_path.is_file():
           raise SystemExit(f"BLOCKED: task brief not found: {brief_path}")
-      if brief_path.read_text(encoding="utf-8").splitlines()[0] != f"# Task Brief: {task_id}":
+      brief_lines = brief_path.read_text(encoding="utf-8").splitlines()
+      if not brief_lines or brief_lines[0] != f"# Task Brief: {task_id}":
           raise SystemExit("BLOCKED: task brief identity mismatch")
       if not base_path.is_file():
           raise SystemExit(f"BLOCKED: task base SHA not found: {base_path}")
 
       base_sha = base_path.read_text(encoding="utf-8").strip()
+      if not base_sha:
+          raise SystemExit("BLOCKED: task base SHA is empty")
       head_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-      entry = f"- [x] {task_id} — {head_sha} — legacy-tiered-complete"
+
+      try:
+          completed_index = lines.index("## Completed Tasks")
+          parked_index = lines.index("## Parked Findings")
+      except ValueError as error:
+          raise SystemExit("BLOCKED: ledger missing required section") from error
+      if completed_index > parked_index:
+          raise SystemExit("BLOCKED: ledger sections are out of order")
+
+      entry = f"- [x] {task_id} — {head_sha} — {outcome}"
       entry_prefix = f"- [x] {task_id} —"
       if not any(line.startswith(entry_prefix) for line in lines):
-          try:
-              parked_index = lines.index("## Parked Findings")
-          except ValueError as error:
-              raise SystemExit("BLOCKED: ledger missing Parked Findings section") from error
           lines[parked_index:parked_index] = [entry, ""]
-          ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-      print(f"Ledger checkpoint saved: {task_slug} (base {base_sha})")
+      if outcome == "APPROVED_WITH_PARKED":
+          advisory_lines = [
+              line.strip()
+              for line in advisory_findings.splitlines()
+              if "[ADVISORY]" in line
+          ]
+          if not advisory_lines:
+              raise SystemExit(
+                  "BLOCKED: APPROVED_WITH_PARKED requires classified [ADVISORY] findings"
+              )
+          parked_index = lines.index("## Parked Findings")
+          parked_entries = [
+              f"- {task_id} — round {round_number} — {finding.removeprefix('- ').strip()} — "
+              "non-load-bearing after bounded review"
+              for finding in advisory_lines
+          ]
+          lines[parked_index + 1:parked_index + 1] = [*parked_entries, ""]
+
+      ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+      print(outcome)
       PYEOF
     env:
       TASK_ID: "{{current_task.task_id}}"
@@ -619,3 +826,9 @@ steps:
       TASK_BASE_SHA_PATH: "{{task_state.task_base_sha_path}}"
       PLAN_IDENTITY: "{{plan_identity}}"
       LEDGER_PATH: "{{ledger_path}}"
+      IMPLEMENTATION_STATUS: "{{implementation_report.status}}"
+      REVIEW_OUTCOME: "{{review_resolution.outcome}}"
+      NO_LOAD_BEARING: "{{review_resolution.no_load_bearing}}"
+      REVIEW_ROUND: "{{review_resolution.round}}"
+      ADVISORY_FINDINGS: "{{review_resolution.advisory_findings}}"
+    output: "task_outcome"
