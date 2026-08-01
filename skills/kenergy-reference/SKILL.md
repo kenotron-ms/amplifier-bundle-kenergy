@@ -3,9 +3,11 @@ name: kenergy-reference
 description: "Complete reference tables for Kenergy modes, agents, recipes, and anti-patterns — VDD workflow"
 ---
 
-# Reference: The Kenergy Pipeline
+# Reference: Kenergy Completion Paths
 
-The full development workflow:
+Kenergy deliberately supports two distinct completion paths.
+
+### Manual/standalone path (interactive)
 
 ```text
 /think-like-ken  ->  Design document -> design approval
@@ -14,24 +16,43 @@ The full development workflow:
      |
 /build-like-ken  ->  Continuous task lifecycle: implement -> merged three-axis review -> bounded remediation
      |
-/verify          ->  Fresh evidence that the complete change works
+/verify           ->  Fresh independently interpreted evidence (recommended)
      |
-/finish          ->  Finish decision: merge / PR / keep / discard
+/finish           ->  Finish decision: merge / PR / keep / discard
 ```
+
+An interactive human may transition directly from `/build-like-ken` to
+`/finish`, but `/verify` remains the recommended separate evidence-gathering
+step before the finish decision.
+
+### Automated/recipe path (non-interactive)
+
+```text
+kenergy-full-development-cycle.yaml
+  -> continuous subagent-driven development
+  -> holistic kenergy:code-reviewer branch review
+  -> required finish approval
+```
+
+The automated path does not activate `/verify`. Its holistic branch review is
+the automated counterpart to the completion evidence gathered interactively by
+`/verify`.
 
 At any point, if a bug needs root-cause investigation: `/debug`.
 
 **Priority order when multiple modes could apply:**
 1. Process modes first (`/think-like-ken`, `/debug`) — determine how to approach the task.
 2. Implementation modes second (`/plan-like-ken`, `/build-like-ken`) — prepare and execute the plan.
-3. Completion modes last (`/verify`, `/finish`) — gather final evidence and close out work.
+3. Manual completion modes last (`/verify`, `/finish`) — gather final evidence and close out interactive work.
 
 ## Reference: Human Checkpoints
 
 There are exactly two human checkpoints in the Kenergy workflow:
 
 1. **Design approval** — after the design document is complete and before planning.
-2. **Finish decision** — after all accepted task work and final verification, choose merge, PR, keep, or discard.
+2. **Finish decision** — after accepted task work and completion evidence
+   (manual `/verify` when used, or the automated full-cycle branch review),
+   choose merge, PR, keep, or discard.
 
 There is no per-task approval, review approval, or continuation prompt after
 pre-flight clears. The durable ledger and bounded review lifecycle govern task
@@ -52,8 +73,8 @@ useful when an agent needs to request a transition during automated workflows.
 | Plan Like Ken | `/plan-like-ken` | Create a detailed VDD implementation plan | You (main agent) |
 | Build Like Ken | `/build-like-ken` | Continuous plan execution through a uniform reviewer lifecycle | Subagents; you orchestrate |
 | Debug | `/debug` | Four-phase systematic debugging | You investigate; a subagent fixes |
-| Verify | `/verify` | Evidence-based completion verification | You (main agent) |
-| Finish | `/finish` | Make the finish decision | You (main agent) |
+| Verify | `/verify` | Interactive, evidence-based completion verification for the manual path | You (main agent) |
+| Finish | `/finish` | Make the manual finish decision; the automated path uses its required recipe approval | You (main agent) |
 
 ## Reference: Agents
 
@@ -63,7 +84,7 @@ useful when an agent needs to request a transition during automated workflows.
 | `kenergy:plan-writer` | Creates and parses detailed VDD plans; performs plan-level pre-flight work | During planning and before continuous execution |
 | `kenergy:implementer` | Implements one task with static analysis, real verification, exact output, and an atomic commit | Every task and each fresh escalation in `/build-like-ken` |
 | `kenergy:reviewer` | Reviews one completed task on three axes: goal/spec compliance, quality, and verification adequacy | Mandatory after each implementation or fix; receives `TASK GOAL` and `REVIEW PACKAGE` |
-| `kenergy:code-reviewer` | Holistic review of the complete changeset | Pre-merge or during `/verify` and `/finish` |
+| `kenergy:code-reviewer` | Holistic review of the complete changeset | Automated full-cycle branch review; optionally during manual `/verify` or `/finish` |
 
 **Delegation rules:**
 
@@ -73,7 +94,9 @@ useful when an agent needs to request a transition during automated workflows.
 - **Build-Like-Ken:** You orchestrate; subagents create artifacts and code. Use
   `subagent-driven-development.yaml` for normal continuous execution, or mirror
   its exact lifecycle with direct `delegate()` calls for bootstrap/manual cases.
-  You never write implementation code in this mode.
+  You never write implementation code in this mode. Manual completion may use
+  `/verify` before `/finish`; the automated full cycle instead runs the holistic
+  branch review and required finish approval without activating `/verify`.
 - **Merged task review:** Every task uses one `kenergy:reviewer`, not multiple
   per-task review stages. A PASS requires all three axes to pass and no
   load-bearing finding.
@@ -153,7 +176,7 @@ Execute these workflows with the recipes tool:
 | `kenergy:recipes/git-worktree-setup.yaml` | Create an isolated workspace | Before implementation when a worktree is needed |
 | `kenergy:recipes/finish-branch.yaml` | Complete the development branch | After implementation and final verification |
 | `kenergy:recipes/validate-implementation.yaml` | Validate existing work | For externally completed code |
-| `kenergy:recipes/executing-plans.yaml` | Execute plans in batches | Batch execution with persisted progress |
+| `kenergy:recipes/executing-plans.yaml` | Compatibility entry point forwarding to continuous subagent-driven execution | Existing callers that still pass `batch_size`; it is accepted and ignored |
 
 ## Reference: Anti-Rationalization Table
 

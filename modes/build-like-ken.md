@@ -20,7 +20,7 @@ mode:
       - bash
 
   default_action: block
-  allowed_transitions: [debug, plan-like-ken]
+  allowed_transitions: [verify, finish, debug, plan-like-ken]
   allow_clear: false
 ---
 
@@ -44,11 +44,24 @@ worktree. If it does not, stop and transition to `/plan-like-ken`.
 The execution root must be the Git worktree root. Every child that reads, writes,
 tests, or commits must use that exact worktree, never its parent checkout.
 
-## Two Equivalent Execution Paths
+## Execution Paths
 
-### Recipe path: normal continuous execution
+### Automated recipe path: non-interactive full cycle
 
-For a plan that can run end-to-end, invoke the existing workflow:
+`kenergy-full-development-cycle.yaml` is the automated completion path:
+
+```text
+continuous subagent-driven development
+  -> holistic kenergy:code-reviewer branch review
+  -> required finish approval
+```
+
+The automated path does **not** activate a separate `/verify` mode. Its
+holistic branch review provides the automated counterpart to the independent
+completion evidence gathered by `/verify` in the manual path.
+
+For task execution without the surrounding full-cycle recipe, invoke the
+existing continuous workflow:
 
 ```python
 recipes(
@@ -61,12 +74,12 @@ recipes(
 )
 ```
 
-`subagent-driven-development.yaml` performs the complete lifecycle. It parses
-and validates the plan, validates plan-scoped ledger identity, runs one
-pre-flight conflict scan, and invokes `single-task-pipeline.yaml` sequentially
-for every incomplete task. It does not stop between accepted tasks.
+`subagent-driven-development.yaml` parses and validates the plan, validates
+plan-scoped ledger identity, runs one pre-flight conflict scan, and invokes
+`single-task-pipeline.yaml` sequentially for every incomplete task. It does not
+stop between accepted tasks.
 
-### Direct delegate path: bootstrapping or manual orchestration
+### Manual/standalone path: mode-by-mode or direct delegation
 
 A human/orchestrator may drive the same lifecycle one `delegate()` call at a
 time. This is valid for bootstrap work, such as building the workflow itself,
@@ -77,6 +90,18 @@ The root orchestrator remains read-only. For direct execution, delegate durable
 artifact creation (task briefs, base SHAs, persisted review packets, and ledger
 updates) to a write-capable child session. The recipe owns those writes when the
 recipe path is used.
+
+For interactive completion, use:
+
+```text
+/build-like-ken -> /verify (recommended) -> /finish
+```
+
+`/verify` remains the separate mode for gathering fresh, independently
+interpreted evidence before finishing. It is optional: a human may transition
+directly from `/build-like-ken` to `/finish`, whose own entry checks still
+govern finalization. Both `/verify` and `/finish` are allowed transitions from
+this mode.
 
 ## State Machine
 
@@ -92,7 +117,8 @@ LOAD PLAN -> validate ledger identity -> pre-flight conflicts once
       FAIL rounds 4-5 -> fresh implementer with escalated model role
       FAIL at cap -> park advisory with reason; BLOCKED on load-bearing
     write ledger only after accepted review
-  ALL DONE -> one-line result -> /finish
+  ALL DONE -> manual: /verify (recommended) -> /finish, or /finish directly
+           -> automated full cycle: holistic branch review -> finish approval
 ```
 
 The fifth remediation is followed by a sixth, cap-only review. The cap review
@@ -347,7 +373,7 @@ If a task blocks, return the exact blocker and preserve its artifacts for later
 resumption. Do not mark it complete and do not continue around a load-bearing
 failure.
 
-## Completion
+## Completion Paths
 
 When every task has an accepted ledger entry, report one concise result such as:
 
@@ -355,8 +381,16 @@ When every task has an accepted ledger entry, report one concise result such as:
 STATUS: ALL_TASKS_COMPLETE — ledger: <ledger-path>
 ```
 
-The recipe returns machine-readable completion status and ledger location; the
-orchestrator condenses that result for the user, then transitions to `/finish`.
+The task-execution recipe returns machine-readable completion status and ledger
+location. The caller uses one of these intentionally distinct paths:
+
+- **Manual/standalone:** transition to `/verify` for fresh independent evidence
+  before `/finish` (recommended), or transition directly to `/finish` when the
+  human chooses to rely on that mode's final checks.
+- **Automated full cycle:** `kenergy-full-development-cycle.yaml` follows
+  continuous execution with a holistic `kenergy:code-reviewer` branch review
+  and its required finish approval. It does not invoke `/verify`.
+
 Do not perform a merge, push, PR creation, deployment, or branch cleanup from
 this mode.
 
@@ -387,4 +421,7 @@ When entering this mode, announce:
 
 - Missing or inadequate plan: `/plan-like-ken`
 - A bug or implementation failure requiring root-cause investigation: `/debug`
-- All tasks accepted: `/finish`
+- All tasks accepted, manual/standalone path: `/verify` (recommended) then
+  `/finish`, or `/finish` directly
+- All tasks accepted, automated full-cycle recipe: holistic branch review and
+  required finish approval occur inside the recipe; no `/verify` mode is invoked
