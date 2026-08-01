@@ -71,7 +71,7 @@ This is the recommended path for any multi-phase work. It carries the work from 
 
 ### MANUAL: Individual Modes
 
-For partial workflows, ad-hoc tasks, bug fixes, or one-off verification. You suggest transitions between modes but don't force them. The user activates each mode explicitly.
+For partial workflows, ad-hoc tasks, bug fixes, or one-off verification. You suggest transitions between modes but don't force them. The user either invokes a mode explicitly or consents to a recommendation; in either case, activate it immediately.
 
 | Situation | Suggest |
 |-----------|---------|
