@@ -52,7 +52,7 @@ Before writing the plan, explore the codebase to ensure accuracy:
 3. **Check the verification toolchain** — what static analysis tools does this project use? (ruff, ty, tsc, oxlint?)
 4. **Verify file paths** — confirm directories exist and paths in the plan will be correct
 5. **Note imports and dependencies** — understand what's already available so plan code is accurate
-6. **Extract contract requirements** — capture the spec's project-wide requirements verbatim for `## Global Constraints` and define exact per-task `Consumes`/`Produces` interfaces. Omitting either block is an error; do not write the plan until both are ready.
+6. **Extract task contract requirements** — capture the spec's project-wide requirements verbatim for `## Global Constraints`; define non-empty per-task `Description`, `Goal`, `Specification`, and `Acceptance Criteria` fields; define exact `Consumes`/`Produces` interfaces; and select explicit model roles. Omitting any required block or field is an error; do not write the plan until all are ready.
 
 This exploration ensures the plan contains verified, accurate paths and real code patterns — not guesses.
 
@@ -85,6 +85,14 @@ Each task is ONE logical unit of work. 2-5 minutes of focused implementation:
 ```markdown
 ### Task N: [Component Name]
 
+**Description:** [concise task summary]
+
+**Goal:** [task-level outcome — the specific behavior this task must produce]
+
+**Specification:** [precise behavioral requirements]
+
+**Acceptance Criteria:** [observable completion criteria]
+
 **Files:**
 - Create: `exact/path/to/file.py`
 - Modify: `exact/path/to/existing.py:123-145`
@@ -94,6 +102,11 @@ Each task is ONE logical unit of work. 2-5 minutes of focused implementation:
 - Produces: [what later tasks rely on — exact function names, parameter
   and return types. A task's implementer sees only their own task; this
   block is how they learn the names and types neighboring tasks use.]
+
+**Model Roles:**
+- implementation_model_role: `coding`
+- review_model_role: `critique`
+- escalated_model_role: `reasoning`
 
 **Implementation**
 [complete copy-pasteable code]
@@ -147,7 +160,11 @@ saved plan and runs them sequentially.
 
 **Global Constraints.** Include one `## Global Constraints` block after Tech Stack and Verification approach. Copy project-wide requirements verbatim; omitting the block or changing exact values is an error.
 
+**Task Contract Fields.** Before every task's Files block, include non-empty `**Description:**`, `**Goal:**`, `**Specification:**`, and `**Acceptance Criteria:**` fields. They map directly to the executor's `description`, `goal`, `spec`, and `acceptance_criteria` task fields; omitting any is an error.
+
 **Interfaces.** Include one `**Interfaces:**` block after every task's Files block, with exact `Consumes` and `Produces` contracts; omitting a block or leaving a boundary vague is an error.
+
+**Model Roles.** Include one `**Model Roles:**` block after every task's Interfaces block with explicit `implementation_model_role`, `review_model_role`, and `escalated_model_role` values. Select roles by integration and design risk: implementation from `fast`, `coding`, or `reasoning`; review from `fast`, `critique`, or `reasoning`; and escalation from `coding`, `reasoning`, or `critical-ops`, strictly above the implementation role. Omitting a role or using an invalid selection is an error.
 
 **Complete code.** Not "add validation" — show the actual code.
 
@@ -170,7 +187,9 @@ Save plans to: `docs/plans/YYYY-MM-DD-<feature-name>.md`
 - Vague instructions ("add appropriate error handling")
 - Missing file paths or verification steps
 - Missing `## Global Constraints` block or spec values not copied verbatim
+- Missing or blank `Description`, `Goal`, `Specification`, or `Acceptance Criteria` before any task's Files block
 - Missing `**Interfaces:**` block after any task's Files block, or vague `Consumes`/`Produces` boundaries
+- Missing `**Model Roles:**` block after any task's Interfaces block, or missing or invalid model-role selections
 - Defaulting to unit tests for non-library code without justification
 - "Test it manually" — not a verification step
 - Adding scope not authorized by the approved design or repository evidence
