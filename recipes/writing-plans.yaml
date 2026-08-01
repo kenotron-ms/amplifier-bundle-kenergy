@@ -133,6 +133,14 @@ stages:
 
           ### Task 1: [Task Name]
 
+          **Description:** [Concise task summary]
+
+          **Goal:** [Task-level outcome — the specific behavior this task must produce]
+
+          **Specification:** [Precise behavioral requirements]
+
+          **Acceptance Criteria:** [Observable completion criteria]
+
           **Files:**
           - Create: `exact/path/to/file.py`
           - Modify: `exact/path/to/existing.py:123-145`
@@ -187,7 +195,7 @@ stages:
 
           ---
 
-          CRITICAL REQUIREMENTS:
+          CONTENT RULES (all omissions are errors):
           1. Assume the engineer has ZERO context about this codebase
           2. Every code block must be COMPLETE and copy-pasteable
           3. NO placeholders like "..." or "// add your code here"
@@ -199,12 +207,21 @@ stages:
           9. Replace the Global Constraints explanatory text with the exact
              project-wide requirements from the design analysis; do not omit the
              `## Global Constraints` block.
-          10. Include the `**Interfaces:**` block after every task's Files block
+          10. Before every task's `**Files:**` block, include non-empty
+              `**Description:**`, `**Goal:**`, `**Specification:**`, and
+              `**Acceptance Criteria:**` fields. They map directly to the
+              executor's `description`, `goal`, `spec`, and
+              `acceptance_criteria` task fields; omitting any is an error.
+          11. Include the `**Interfaces:**` block after every task's Files block
               with concrete Consumes and Produces contracts.
-          11. Include concrete `implementation_model_role`,
+          12. Include concrete `implementation_model_role`,
               `review_model_role`, and `escalated_model_role` values for every
               task. Select roles by engineering judgment based on integration and
               design risk, not task duration or file count.
+
+          RED FLAGS (correct before returning the plan):
+          - Any task missing or leaving blank Description, Goal, Specification,
+            or Acceptance Criteria fields.
 
           Generate the complete implementation plan now.
         output: "implementation_plan"
