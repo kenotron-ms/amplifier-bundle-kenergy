@@ -5,19 +5,18 @@
 #   amplifier run "execute kenergy:recipes/kenergy-full-development-cycle.yaml with feature_name='my-feature'"
 #   amplifier run "execute kenergy:recipes/kenergy-full-development-cycle.yaml with feature_name='my-feature' topic='description of feature'"
 #
-# This meta-recipe composes all Kenergy recipes:
-#   brainstorming -> writing-plans -> git-worktree-setup -> executing-plans -> finish-branch
+# This meta-recipe composes the Kenergy development path:
+#   design -> planning -> continuous subagent-driven execution -> holistic review -> finish
 #
-# Approval Gates (3):
+# Approval Gates (2):
 #   1. After design - approve before planning
-#   2. After plan - approve before implementation
-#   3. After implementation - choose finish action (merge/PR/keep/discard)
+#   2. After branch review - choose finish action (merge/PR/keep/discard)
 
 name: "kenergy-full-development-cycle"
-description: "Complete development workflow from idea to merged code, composing all Kenergy recipes with VDD"
-version: "1.0.2"
+description: "Complete development workflow with design and finish checkpoints around continuous VDD execution"
+version: "2.0.0"
 author: "Kenergy Bundle"
-tags: ["workflow", "development", "vdd", "full-cycle", "meta-recipe"]
+tags: ["workflow", "development", "vdd", "full-cycle", "continuous-execution", "holistic-review"]
 
 context:
   feature_name: ""      # Required: name for branch and files (e.g., "user-authentication")
@@ -55,6 +54,7 @@ stages:
       # Understand project context
       - id: "understand-context"
         agent: "kenergy:design-writer"
+        model_role: "fast"
         prompt: |
           Understand the project context for designing: {{feature_name}}
           
@@ -72,6 +72,7 @@ stages:
       # Explore requirements through questions
       - id: "explore-requirements"
         agent: "kenergy:design-writer"
+        model_role: "reasoning"
         prompt: |
           Based on the project context:
           {{project_context}}
@@ -93,6 +94,7 @@ stages:
       # Design the solution
       - id: "create-design"
         agent: "kenergy:design-writer"
+        model_role: "reasoning"
         prompt: |
           Create a design document for: {{feature_name}}
           
@@ -127,6 +129,7 @@ stages:
       # Present design for approval
       - id: "present-design"
         agent: "kenergy:design-writer"
+        model_role: "fast"
         prompt: |
           Present the design for approval.
           
@@ -171,6 +174,7 @@ stages:
       # Create implementation plan
       - id: "create-plan"
         agent: "kenergy:plan-writer"
+        model_role: "reasoning"
         prompt: |
           Create a detailed VDD implementation plan for: {{feature_name}}
           
@@ -222,43 +226,16 @@ stages:
         output: "save_plan_result"
         timeout: 60
 
-      # Present plan for approval
-      - id: "present-plan"
-        agent: "kenergy:plan-writer"
-        prompt: |
-          Present the implementation plan for approval.
-          
-          Plan saved to: {{paths.plan_path}}
-          
-          Summarize:
-          1. Total number of tasks
-          2. Estimated complexity (simple/medium/complex)
-          3. Verification methods used across tasks
-          4. Key milestones
-          5. Any concerns about the plan
-        output: "plan_summary"
-
-    # APPROVAL GATE 2: Approve plan before implementation
-    approval:
-      prompt: |
-        ## Plan Review
-        
-        {{plan_summary}}
-        
-        Plan document: {{paths.plan_path}}
-        
-        **APPROVE** to proceed to implementation.
-        **DENY** to revise the plan.
-
   # ==========================================================================
   # STAGE 3: Implementation
-  # Create worktree and execute plan with VDD
+  # Create a worktree and execute the plan continuously with VDD
   # ==========================================================================
   - name: "implementation"
     steps:
       # Create git worktree for isolated development
       - id: "create-worktree"
         agent: "foundation:git-ops"
+        model_role: "fast"
         prompt: |
           Create a git worktree for feature development.
           
@@ -283,7 +260,7 @@ stages:
         output: "plan_doc"
         timeout: 30
 
-      # Execute plan using the SDD recipe
+      # Execute the plan continuously using the SDD recipe
       - id: "execute-plan"
         type: "recipe"
         recipe: "subagent-driven-development.yaml"
@@ -308,6 +285,7 @@ stages:
       - id: "debug-if-needed"
         condition: "{{error_check.has_error}} == true"
         agent: "foundation:bug-hunter"
+        model_role: "coding"
         prompt: |
           Implementation encountered an error. Debug and fix.
           
@@ -324,24 +302,23 @@ stages:
         output: "debug_result"
         on_error: "continue"
 
-      # Verify implementation against spec
-      - id: "verify-implementation"
-        agent: "kenergy:verifier"
+      # Review the complete branch after continuous task execution
+      - id: "review-branch"
+        agent: "kenergy:code-reviewer"
+        model_role: "critique"
         prompt: |
-          Verify the implementation is complete and correct.
-          
+          Perform a holistic branch review after continuous plan execution.
+
           Worktree: {{project_path}}/.worktrees/{{paths.feature_slug}}
           Plan: {{plan_doc}}
-          
-          Check:
-          1. All tasks from plan are complete
-          2. Static analysis is clean
-          3. Tests pass (if applicable)
-          4. Key functionality has been verified with real execution
-          5. No debug code or temporary hacks left behind
-          
-          Provide a verification report with pass/fail status.
-        output: "verification_result"
+          Continuous execution result: {{implementation_result}}
+
+          Review the entire changeset in the worktree, not individual task
+          reviews. Assess cross-task integration, architectural consistency,
+          production readiness, plan alignment, and verification coverage.
+          Use the code-reviewer's output contract and do not modify files,
+          commit, push, merge, open a PR, or deploy.
+        output: "branch_review"
         on_error: "continue"
 
       # Present implementation for approval
@@ -362,14 +339,14 @@ stages:
         timeout: 120
         on_error: "continue"
 
-    # APPROVAL GATE 3: Choose finish action
+    # APPROVAL GATE 2: Choose finish action
     approval:
       prompt: |
         ## Implementation Complete
         
         {{implementation_summary}}
         
-        Verification: {{verification_result}}
+        Holistic branch review: {{branch_review}}
         
         Choose how to finish:
         - **APPROVE** with message "merge" - Merge to main and cleanup
@@ -400,6 +377,7 @@ stages:
       # Execute the finish action
       - id: "execute-finish"
         agent: "foundation:git-ops"
+        model_role: "fast"
         prompt: |
           Finish the development branch.
           

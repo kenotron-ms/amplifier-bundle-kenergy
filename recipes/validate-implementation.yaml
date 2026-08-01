@@ -1,46 +1,38 @@
 # Validate Implementation Against Plan
-# A lightweight validation recipe that checks already-completed work against an
-# implementation plan. Single-pass review only — no fix cycles, no implementer
-# dispatch. Issues found go into a summary for the human to decide what to do.
-#
-# Key Design Principles:
-#   - NO while_condition loops — single-pass validation only
-#   - NO implementer dispatch — work is already done externally
-#   - Reviewer prompts calibrated for "validation not gatekeeping"
-#   - Only FUNCTIONAL spec violations, CRITICAL quality issues, and VDD violations flagged
+# A lightweight, single-pass validation recipe for work completed outside this
+# workflow. It supplies every task reviewer with one precomputed read-only
+# branch-range packet and does not dispatch fixes.
 #
 # Workflow:
-#   For EACH task in the plan:
-#     1. Verification validation — single-pass review against spec + real execution check
-#     2. Quality validation — single-pass review for critical issues only
-#   After ALL tasks:
-#     3. Compile validation summary
-#     4. APPROVAL GATE — human reviews results
+#   1. Parse the plan with complete task goals and risk-scaled review roles.
+#   2. Build one read-only packet for the externally completed branch range.
+#   3. Review each task once on spec/goal, quality, and verification axes.
+#   4. Summarize the merged verdicts for a human decision.
 #
 # Usage:
 #   amplifier run "execute kenergy:recipes/validate-implementation.yaml with plan_path=docs/implementation-plan.md"
 
 name: "validate-implementation"
-description: "Validate externally-completed work against an implementation plan with single-pass review"
-version: "1.0.0"
+description: "Single-pass validation of externally-completed work with merged three-axis task reviews"
+version: "2.0.0"
 author: "Kenergy Bundle"
-tags: ["validation", "review", "single-pass", "lightweight", "spec-compliance", "vdd"]
+tags: ["validation", "review", "single-pass", "merged-review", "spec-compliance", "vdd"]
 
 context:
   plan_path: ""  # Required: Path to the implementation plan file
 
 stages:
   # ============================================================================
-  # STAGE 1: Validation
-  # Single-pass spec and quality review for each task — no fix cycles
+  # STAGE 1: Single-Pass Validation
   # ============================================================================
   - name: "validation"
     steps:
       # -----------------------------------------------------------------------
-      # Step 1: Load and Parse Implementation Plan
+      # Step 1: Load and Parse the Implementation Plan
       # -----------------------------------------------------------------------
       - id: "load-plan"
         agent: "kenergy:plan-writer"
+        model_role: "fast"
         prompt: |
           Load the implementation plan from: {{plan_path}}
 
@@ -49,10 +41,18 @@ stages:
           For each task, extract:
           - task_id: Unique identifier or name
           - description: What needs to be implemented
+          - goal: The intended outcome of the task
           - spec: The detailed specification/requirements
           - acceptance_criteria: How to verify the task is complete
+          - interfaces: Exact Consumes and Produces interfaces for this task
           - files: Files likely to be created or modified
           - dependencies: Any tasks this depends on (if applicable)
+          - review_model_role: The risk-scaled review role for this task
+
+          Select review_model_role by engineering judgment:
+          - "fast" for a low-risk, mechanical diff.
+          - "critique" for ordinary integration or correctness risk.
+          - "reasoning" for architecture-sensitive or complex review.
 
           Return the result as a JSON object with this exact structure:
           {"tasks": [<array of task objects>], "total_tasks": <number>}
@@ -60,14 +60,17 @@ stages:
           Each task object in the array must have these keys:
           - "task_id": string
           - "description": string
+          - "goal": string
           - "spec": string (the detailed specification)
           - "acceptance_criteria": string
+          - "interfaces": string with exact Consumes and Produces interfaces
           - "files": array of file paths
           - "dependencies": array of task_ids (empty array if none)
+          - "review_model_role": "fast", "critique", or "reasoning"
 
-          The "tasks" key MUST contain the ordered array. Order by dependencies (independent first).
-
-          IMPORTANT: Preserve ALL spec details — they are critical for review.
+          The "tasks" key MUST contain the ordered array. Order by dependencies
+          (independent first). Preserve ALL goal and specification details: they
+          are mandatory review input.
         output: "plan_data"
         parse_json: true
         retry:
@@ -77,149 +80,148 @@ stages:
           max_delay: 60
 
       # -----------------------------------------------------------------------
-      # Step 2: Per-Task Validation (verification review + quality review, NO fix loops)
+      # Step 2: Build One Read-Only Packet for the Externally Completed Range
+      # -----------------------------------------------------------------------
+      - id: "build-review-package"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+
+          if git symbolic-ref --quiet --short refs/remotes/origin/HEAD >/dev/null 2>&1; then
+            BASE_REF="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)"
+          elif git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+            BASE_REF="origin/main"
+          elif git rev-parse --verify --quiet main >/dev/null 2>&1; then
+            BASE_REF="main"
+          elif git rev-parse --verify --quiet origin/master >/dev/null 2>&1; then
+            BASE_REF="origin/master"
+          elif git rev-parse --verify --quiet master >/dev/null 2>&1; then
+            BASE_REF="master"
+          else
+            BASE_REF="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+          fi
+
+          BASE_SHA="$(git merge-base "$BASE_REF" HEAD 2>/dev/null || git rev-parse "$BASE_REF")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          {
+            printf '# Review Package\n\n'
+            printf 'Plan: %s\n' '{{plan_path}}'
+            printf 'Range Base: %s (%s)\nRange Head: %s\n\n' "$BASE_SHA" "$BASE_REF" "$HEAD_SHA"
+            printf '## Diff Stat\n\n```text\n'
+            git diff --stat "$BASE_SHA..$HEAD_SHA"
+            printf '```\n\n## Commits\n\n```text\n'
+            git log --oneline "$BASE_SHA..$HEAD_SHA"
+            printf '```\n\n## Diff\n\n```diff\n'
+            git diff "$BASE_SHA..$HEAD_SHA" --
+            printf '```\n\n## Working Tree Status\n\n```text\n'
+            git status --short
+            printf '```\n\n## Uncommitted Diff\n\n```diff\n'
+            git diff --cached --
+            git diff --
+            printf '```\n'
+          }
+        output: "review_package"
+
+      # -----------------------------------------------------------------------
+      # Step 3: Per-Task Merged Review (Single Pass, No Fix Loop)
       # -----------------------------------------------------------------------
       - id: "per-task-validation"
         foreach: "{{plan_data.tasks}}"
         as: "current_task"
+        parallel: false
         steps:
-          # --- 2a: Single-pass verification validation ---
-          - id: "validate-spec"
-            agent: "kenergy:verifier"
-            prompt: |
-              VERIFICATION VALIDATION (Single-Pass)
-              ======================================
+          - id: "review-fast"
+            condition: "{{current_task.review_model_role}} == 'fast'"
+            agent: "kenergy:reviewer"
+            model_role: "fast"
+            prompt: &review_prompt |
+              TASK GOAL
+              =========
+              Task ID: {{current_task.task_id}}
+              Goal: {{current_task.goal}}
+              Description: {{current_task.description}}
+              Specification: {{current_task.spec}}
+              Acceptance Criteria: {{current_task.acceptance_criteria}}
+              Interfaces: {{current_task.interfaces}}
+              Files: {{current_task.files}}
 
-              This code was implemented EXTERNALLY. Your job is to VALIDATE, not to request style changes.
+              REVIEW PACKAGE
+              ==============
+              {{review_package}}
 
-              TASK SPEC:
-              {{current_task}}
-
-              YOUR MISSION:
-              1. Read the ACTUAL CODE referenced in the task spec
-              2. Compare every spec requirement against what was implemented
-              3. Check if static analysis was run (or run it yourself)
-              4. Check if real execution was performed and documented
-                 - API endpoint → was curl/HTTP call made?
-                 - UI change → was browser opened?
-                 - Library code → were tests run?
-
-              IMPORTANT CALIBRATION:
-              Only flag FUNCTIONAL spec violations: missing required features, wrong behavior,
-              or complete absence of any real execution evidence.
-              Do NOT flag: style preferences, alternative implementation approaches.
-
-              This is VALIDATION of completed work, not a gatekeeping exercise.
-
-              End your review with exactly one of:
-              - "VERDICT: APPROVED"
-              - "VERDICT: NEEDS ATTENTION — [list FUNCTIONAL-ONLY issues]"
-            output: "spec_verdict"
+              This is a single-pass validation of externally completed work.
+              Review the supplied task goal and package on all three axes. Do not
+              implement fixes, request a retry, or reconstruct the Git packet.
+            output: "review_verdict"
             on_error: "continue"
+            timeout: 600
             retry:
               max_attempts: 2
               backoff: exponential
               initial_delay: 5
               max_delay: 60
 
-          # --- 2b: Extract spec verdict as boolean ---
-          - id: "extract-spec-verdict"
-            type: "bash"
-            command: |
-              if cat <<'VERDICT_DELIM' | grep -q "VERDICT: APPROVED"
-              {{spec_verdict}}
-              VERDICT_DELIM
-              then
-                echo "true"
-              else
-                echo "false"
-              fi
-            output: "spec_ok"
+          - id: "review-critique"
+            condition: "{{current_task.review_model_role}} == 'critique'"
+            agent: "kenergy:reviewer"
+            model_role: "critique"
+            prompt: *review_prompt
+            output: "review_verdict"
             on_error: "continue"
-
-          # --- 2c: Single-pass code quality validation ---
-          - id: "validate-quality"
-            agent: "kenergy:quality-reviewer"
-            prompt: |
-              CODE QUALITY VALIDATION (Single-Pass)
-              ======================================
-
-              This is validation of externally-completed work. Only flag CRITICAL quality issues.
-
-              TASK:
-              {{current_task}}
-
-              YOUR MISSION:
-              1. Read the ACTUAL CODE referenced in the task spec
-              2. Run static analysis if applicable (python_check for Python)
-              3. Check for: critical bugs, security vulnerabilities, data corruption risks,
-                 unhandled error paths that would crash in production
-
-              IMPORTANT CALIBRATION:
-              Minor style preferences are NOT blocking.
-              Alternative approaches you might have taken are NOT blocking.
-              Only CRITICAL quality issues that affect correctness or safety should be flagged.
-
-              This is VALIDATION, not gatekeeping.
-
-              End your review with exactly one of:
-              - "VERDICT: APPROVED"
-              - "VERDICT: NEEDS ATTENTION — [list CRITICAL-ONLY issues]"
-            output: "quality_verdict"
-            on_error: "continue"
+            timeout: 600
             retry:
               max_attempts: 2
               backoff: exponential
               initial_delay: 5
               max_delay: 60
 
-          # --- 2d: Extract quality verdict as boolean ---
-          - id: "extract-quality-verdict"
-            type: "bash"
-            command: |
-              if cat <<'VERDICT_DELIM' | grep -q "VERDICT: APPROVED"
-              {{quality_verdict}}
-              VERDICT_DELIM
-              then
-                echo "true"
-              else
-                echo "false"
-              fi
-            output: "quality_ok"
+          - id: "review-reasoning"
+            condition: "{{current_task.review_model_role}} == 'reasoning'"
+            agent: "kenergy:reviewer"
+            model_role: "reasoning"
+            prompt: *review_prompt
+            output: "review_verdict"
             on_error: "continue"
+            timeout: 600
+            retry:
+              max_attempts: 2
+              backoff: exponential
+              initial_delay: 5
+              max_delay: 60
 
         collect: "validation_results"
 
       # -----------------------------------------------------------------------
-      # Step 3: Compile Validation Summary
+      # Step 4: Summarize the Merged Three-Axis Verdicts
       # -----------------------------------------------------------------------
       - id: "validation-summary"
         agent: "kenergy:plan-writer"
+        model_role: "fast"
         prompt: |
           VALIDATION SUMMARY
           ==================
-          Compile a comprehensive validation report for all tasks.
+          Compile a factual single-pass validation report for all tasks.
 
-          VALIDATION RESULTS (per task):
+          VALIDATION RESULTS (one merged reviewer verdict per task):
           {{validation_results}}
 
           ORIGINAL PLAN DATA:
           {{plan_data}}
 
-          For EACH task, report:
-          - **Task ID/Name**: [from plan]
-          - **Spec Compliance**: PASS or NEEDS ATTENTION (with specific functional issues listed)
-          - **VDD Compliance**: Was real execution performed and documented?
-          - **Code Quality**: PASS or NEEDS ATTENTION (with specific critical issues listed)
-          - **Files Reviewed**: [list of files from the task]
+          For EACH task, summarize the reviewer's three required axes exactly:
+          - **Spec/Goal Compliance**: PASS or FAIL, including any cited goal clause
+            or file:line finding.
+          - **Quality**: PASS or FAIL, including any cited command or file:line finding.
+          - **Verification Adequacy**: PASS or FAIL, including the evidence pointer
+            and the named break that proves the check is falsifiable.
+          - **Overall Review**: PASS or FAIL, with load-bearing and advisory findings.
+          - **Files Reviewed**: the task's declared files.
 
-          Then provide an overall summary:
-          - Total tasks validated
-          - How many passed ALL reviews
-          - How many need attention (with the specific issues)
-
-          This is a VALIDATION report — present facts clearly so the human can decide next steps.
-          Do NOT recommend specific code changes. Just report what was found.
+          Then provide totals for validated tasks, overall passes, and tasks needing
+          attention. This is a factual validation report for a human decision: do
+          not recommend or implement code changes.
         output: "validation_report"
         on_error: "continue"
         retry:
@@ -229,12 +231,13 @@ stages:
           max_delay: 60
 
   # ============================================================================
-  # STAGE 2: Review (APPROVAL GATE)
+  # STAGE 2: Human Review
   # ============================================================================
   - name: "review"
     steps:
       - id: "present-results"
         agent: "kenergy:plan-writer"
+        model_role: "fast"
         prompt: |
           VALIDATION RESULTS — HUMAN REVIEW
           ===================================
@@ -251,19 +254,19 @@ stages:
 
           ## Validation Summary
           - **Total tasks validated**: [count]
-          - **Passed all reviews**: [count]
+          - **Passed all three axes**: [count]
           - **Need attention**: [count]
 
           ## Per-Task Results
-          [For each task, show spec, VDD, and quality verdicts with any issues]
+          For each task, show the merged review's Spec/Goal Compliance, Quality,
+          and Verification Adequacy verdicts with any findings.
 
-          ## Recommended Actions
-          - If all tasks passed: Implementation is validated, ready to proceed.
-          - If some tasks need attention: List the specific tasks and issues.
-            Suggest running the full SDD pipeline (subagent-driven-development.yaml)
-            for any tasks that need fixes.
+          ## Next Steps
+          - If all tasks passed: implementation is validated, ready to proceed.
+          - If tasks need attention: list their specific findings for the human to
+            decide whether to address through the normal execution workflow.
 
-          Keep the presentation factual and actionable.
+          Keep the presentation factual and actionable. Do not prescribe fixes.
         output: "final_output"
         retry:
           max_attempts: 2
@@ -278,15 +281,14 @@ stages:
         VALIDATION COMPLETE — HUMAN REVIEW REQUIRED
         ======================================================================
 
-        All tasks from the implementation plan have been validated with
-        single-pass spec compliance, VDD verification, and code quality reviews.
+        All tasks from the implementation plan received one merged review covering
+        spec/goal compliance, quality, and verification adequacy.
 
         Review the validation results above.
 
         OPTIONS:
-        - APPROVE: Validation accepted. All good, or issues noted for later.
-        - DENY: Issues need fixes. Run the full SDD pipeline
-          (subagent-driven-development.yaml) for tasks that need attention.
+        - APPROVE: Accept the validation report.
+        - DENY: Address the cited findings through the normal execution workflow.
 
         ======================================================================
       timeout: 0
