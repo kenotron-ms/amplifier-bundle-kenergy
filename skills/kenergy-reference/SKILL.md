@@ -173,7 +173,6 @@ Execute these workflows with the recipes tool:
 |--------|---------|-------------|
 | `kenergy:recipes/subagent-driven-development.yaml` | Plan-scoped ledger setup, one pre-flight scan, and continuous sequential task execution | Normal end-to-end plan execution |
 | `kenergy:recipes/single-task-pipeline.yaml` | One uniform implement -> packet review -> bounded remediation -> safe ledger lifecycle | Internal per-task execution and focused recovery |
-| `kenergy:recipes/git-worktree-setup.yaml` | Create an isolated workspace | Before implementation when a worktree is needed |
 | `kenergy:recipes/finish-branch.yaml` | Complete the development branch | After implementation and final verification |
 | `kenergy:recipes/validate-implementation.yaml` | Validate existing work | For externally completed code |
 | `kenergy:recipes/executing-plans.yaml` | Compatibility entry point forwarding to continuous subagent-driven execution | Existing callers that still pass `batch_size`; it is accepted and ignored |
