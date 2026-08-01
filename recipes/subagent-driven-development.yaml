@@ -268,10 +268,11 @@ stages:
           set -eu
           python3 - <<'PYEOF'
           import json
+          import os
           import re
           from pathlib import Path
 
-          raw = Path("{{execution_root.plan_path}}").expanduser()
+          raw = Path(os.environ["PLAN_PATH"]).expanduser()
           plan = raw.resolve()
           if not plan.is_file():
               raise SystemExit(f"BLOCKED: plan not found: {plan}")
@@ -292,22 +293,26 @@ stages:
           if ledger.exists():
               actual = ledger.read_text(encoding="utf-8").splitlines()
               if not actual or actual[0] != first_line:
-                  raise SystemExit(
-                      "BLOCKED: ledger identity mismatch; refusing cross-plan state"
-                  )
+                  raise SystemExit("BLOCKED: ledger identity mismatch; refusing cross-plan state")
           else:
               ledger.write_text(
                   first_line + "\n\n## Completed Tasks\n\n## Parked Findings\n",
                   encoding="utf-8",
               )
 
-          print(json.dumps({
-              "plan_identity": identity,
-              "plan_slug": slug,
-              "state_dir": str(state_dir),
-              "ledger_path": str(ledger),
-          }))
+          print(
+              json.dumps(
+                  {
+                      "plan_identity": identity,
+                      "plan_slug": slug,
+                      "state_dir": str(state_dir),
+                      "ledger_path": str(ledger),
+                  }
+              )
+          )
           PYEOF
+        env:
+          PLAN_PATH: "{{execution_root.plan_path}}"
         parse_json: true
         output: "plan_state"
 
@@ -321,23 +326,20 @@ stages:
         command: |
           set -eu
           python3 - <<'PYEOF'
+          import os
           import re
           import subprocess
           from pathlib import Path
 
-          ledger = Path("{{plan_state.ledger_path}}").expanduser()
+          ledger = Path(os.environ["LEDGER_PATH"]).expanduser()
           if not ledger.is_file():
               raise SystemExit(f"BLOCKED: ledger not found: {ledger}")
 
           lines = ledger.read_text(encoding="utf-8").splitlines()
           # Compare only durable ledger entries with git log --oneline. This
           # step is read-only and never promotes conversation memory to state.
-          log_lines = subprocess.check_output(
-              ["git", "log", "--oneline"], text=True
-          ).splitlines()
-          commit_prefixes = {
-              line.split(maxsplit=1)[0] for line in log_lines if line.strip()
-          }
+          log_lines = subprocess.check_output(["git", "log", "--oneline"], text=True).splitlines()
+          commit_prefixes = {line.split(maxsplit=1)[0] for line in log_lines if line.strip()}
           entry_pattern = re.compile(
               r"^- \[x\] (?P<task>.+?) — (?P<sha>[0-9a-f]+) — (?P<outcome>.+)$"
           )
@@ -364,6 +366,8 @@ stages:
           else:
               print("RECONCILIATION: ledger entries match git log --oneline")
           PYEOF
+        env:
+          LEDGER_PATH: "{{plan_state.ledger_path}}"
 
       # -----------------------------------------------------------------------
       # Step 2: Scan the complete plan once before Task 1

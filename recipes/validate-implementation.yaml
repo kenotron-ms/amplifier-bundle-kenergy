@@ -153,7 +153,7 @@ stages:
 
           {
             printf '# Review Package\n\n'
-            printf 'Plan: %s\n' '{{plan_path}}'
+            printf 'Plan: %s\n' "$PLAN_PATH"
             printf 'Range Base: %s (%s)\nRange Head: %s\n\n' "$BASE_SHA" "$BASE_REF" "$HEAD_SHA"
             printf '## Diff Stat\n\n```text\n'
             git diff --stat "$BASE_SHA..$HEAD_SHA"
@@ -168,6 +168,8 @@ stages:
             git diff --
             printf '```\n'
           }
+        env:
+          PLAN_PATH: "{{plan_path}}"
         output: "review_package"
 
       # -----------------------------------------------------------------------

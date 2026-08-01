@@ -42,19 +42,24 @@ stages:
           set -eu
           python3 - <<'PYEOF'
           import json
+          import os
           import subprocess
           from pathlib import Path
 
-          supplied = "{{worktree_path}}".strip()
-          worktree = Path(supplied).expanduser().resolve() if supplied else Path(
-              subprocess.check_output(
-                  ["git", "rev-parse", "--show-toplevel"], text=True
-              ).strip()
-          ).resolve()
+          supplied = os.environ["WORKTREE_PATH"].strip()
+          worktree = (
+              Path(supplied).expanduser().resolve()
+              if supplied
+              else Path(
+                  subprocess.check_output(
+                      ["git", "rev-parse", "--show-toplevel"], text=True
+                  ).strip()
+              ).resolve()
+          )
           actual_branch = subprocess.check_output(
               ["git", "-C", str(worktree), "branch", "--show-current"], text=True
           ).strip()
-          supplied_branch = "{{branch_name}}".strip()
+          supplied_branch = os.environ["BRANCH_NAME"].strip()
           if not actual_branch:
               raise SystemExit("ERROR: captured worktree is detached; a branch is required")
           if supplied_branch and supplied_branch != actual_branch:
@@ -63,17 +68,33 @@ stages:
                   f"worktree branch {actual_branch!r}"
               )
           branch = actual_branch
-          common = Path(subprocess.check_output(
-              ["git", "-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-              text=True,
-          ).strip()).resolve()
+          common = Path(
+              subprocess.check_output(
+                  [
+                      "git",
+                      "-C",
+                      str(worktree),
+                      "rev-parse",
+                      "--path-format=absolute",
+                      "--git-common-dir",
+                  ],
+                  text=True,
+              ).strip()
+          ).resolve()
           main_repo = common.parent
-          print(json.dumps({
-              "worktree_path": str(worktree),
-              "branch_name": branch,
-              "main_repo_path": str(main_repo),
-          }))
+          print(
+              json.dumps(
+                  {
+                      "worktree_path": str(worktree),
+                      "branch_name": branch,
+                      "main_repo_path": str(main_repo),
+                  }
+              )
+          )
           PYEOF
+        env:
+          WORKTREE_PATH: "{{worktree_path}}"
+          BRANCH_NAME: "{{branch_name}}"
         parse_json: true
         output: "entry_paths"
 

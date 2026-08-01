@@ -191,7 +191,9 @@ steps:
     cwd: "{{worktree_path}}"
     timeout: 10
     command: |
-      cat "{{ledger_path}}"
+      cat -- "$LEDGER_PATH"
+    env:
+      LEDGER_PATH: "{{ledger_path}}"
     output: "project_brief"
 
   # --- 2a: Implement exactly one task with an explicit implementation role ---
@@ -393,9 +395,9 @@ steps:
         timeout: 30
         command: |
           set -eu
-          BASE_SHA=$(cat "{{task_state.task_base_sha_path}}")
+          BASE_SHA=$(cat -- "$TASK_BASE_SHA_PATH")
           HEAD_SHA=$(git rev-parse HEAD)
-          PACKAGE="{{state_dir}}/review-packages/{{task_state.task_slug}}-round-{{_loop_iteration}}.md"
+          PACKAGE="$STATE_DIR/review-packages/$TASK_SLUG-round-$REVIEW_ROUND.md"
           {
             printf '# Review Package\n\n'
             printf 'Base: %s\nHead: %s\n\n' "$BASE_SHA" "$HEAD_SHA"
@@ -408,6 +410,11 @@ steps:
             printf '```\n'
           } > "$PACKAGE"
           cat "$PACKAGE"
+        env:
+          TASK_BASE_SHA_PATH: "{{task_state.task_base_sha_path}}"
+          STATE_DIR: "{{state_dir}}"
+          TASK_SLUG: "{{task_state.task_slug}}"
+          REVIEW_ROUND: "{{_loop_iteration}}"
         output: "review_package"
 
       - id: "review-fast"
