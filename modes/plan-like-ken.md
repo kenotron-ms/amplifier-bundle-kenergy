@@ -117,9 +117,13 @@ Write and save the plan at PLAN SAVE PATH. It must contain:
 - a complete header with Goal, Architecture, Tech Stack, and Verification approach;
 - `## Global Constraints` with project-wide requirements copied exactly from the
   approved design;
-- ordered, atomic tasks with exact file paths;
+- ordered, atomic tasks with non-empty `Description`, `Goal`, `Specification`,
+  and `Acceptance Criteria` fields plus exact file paths;
 - an `**Interfaces:**` block after every task's Files block, with concrete
   Consumes and Produces contracts;
+- a `**Model Roles:**` block for every task with explicit
+  `implementation_model_role`, `review_model_role`, and
+  `escalated_model_role` values;
 - complete, copy-pasteable implementation code for every task;
 - static-analysis commands, exact VDD verification commands, expected outputs,
   and an atomic commit command for every task.
@@ -138,9 +142,12 @@ session.
 Confirm that the delegated save path exists and that the plan contains:
 
 - `## Global Constraints` with the approved design's project-wide requirements;
-- task-level `**Interfaces:**` blocks with `Consumes` and `Produces` contracts.
+- task-level `Description`, `Goal`, `Specification`, and `Acceptance Criteria`
+  fields, all non-empty;
+- task-level `**Interfaces:**` blocks with `Consumes` and `Produces` contracts;
+- task-level `**Model Roles:**` blocks with all three explicit role fields.
 
-Only a plan that passes both checks can move to execution.
+Only a plan that passes all checks can move to execution.
 
 ### 5. Hand directly to continuous execution
 
@@ -165,7 +172,10 @@ continuous execution.
 
 ## What the Plan Must Contain
 
-**Plan size:** >15 tasks → split into phases. Each phase gets its own document.
+**Plan size:** Plans with more than 15 tasks remain one plan document. Organize
+them under ordered `## Phase N: [Phase Name]` section headers for readability.
+Do not create separate phase files or a phase manifest. The executor parses every
+task from the single saved plan and runs them sequentially.
 
 Each task is ONE logical unit of work:
 - "Implement the endpoint handler" — one task
@@ -178,8 +188,14 @@ Do NOT break verification into a separate disconnected task from the thing being
 Every plan must contain a `## Global Constraints` section that copies
 project-wide requirements from the approved design verbatim. Every task must
 contain:
+- **Description** — concise task summary
+- **Goal** — the specific behavior the task must produce
+- **Specification** — precise behavioral requirements
+- **Acceptance Criteria** — observable completion criteria
 - **Exact file paths** — `src/auth/validator.py`, not "the validator module"
 - **Interfaces** — exact `Consumes` and `Produces` contracts for neighboring tasks
+- **Model Roles** — explicit `implementation_model_role`, `review_model_role`,
+  and `escalated_model_role` values
 - **Complete code** — copy-pasteable, not "add validation logic here"
 - **Exact verification command** — not "test it", but `curl -X POST http://localhost:8000/auth -d '{"user":"test"}'` or `ruff check src/ && ty check src/` or `playwright-cli open http://localhost:3000`
 - **Expected output** — what does success look like exactly
@@ -189,6 +205,14 @@ contain:
 ````markdown
 ### Task N: [Component Name]
 
+**Description:** [Concise task summary]
+
+**Goal:** [Task-level outcome — the specific behavior this task must produce]
+
+**Specification:** [Precise behavioral requirements]
+
+**Acceptance Criteria:** [Observable completion criteria]
+
 **Files:**
 - Create: `exact/path/to/file.py`
 - Modify: `exact/path/to/existing.py:123-145`
@@ -196,6 +220,11 @@ contain:
 **Interfaces:**
 - Consumes: [exact functions, types, files, configuration, or data contracts from earlier tasks]
 - Produces: [exact functions, types, files, configuration, or data contracts for later tasks]
+
+**Model Roles:**
+- implementation_model_role: `coding`
+- review_model_role: `critique`
+- escalated_model_role: `reasoning`
 
 **Implementation**
 [complete copy-pasteable code]
@@ -265,7 +294,8 @@ git commit -m "feat: [what this does]"
 - Default to "write a unit test" without asking whether that's the right verification
 - Write vague verification ("test it manually")
 - Leave the verification method unspecified in any task
-- Omit `## Global Constraints` or task-level `**Interfaces:**` contracts
+- Omit `## Global Constraints`, required task contract fields, task-level
+  `**Interfaces:**` contracts, or explicit model-role fields
 - Combine multiple logical units into one task
 - Leave ANY implementation decision to the executor's judgment
 - Run git push, git merge, gh pr create, or any deployment commands
@@ -274,12 +304,13 @@ git commit -m "feat: [what this does]"
 
 When entering this mode, announce:
 
-> I'm entering plan-like-ken mode. The approved design authorizes planning. I'll inspect the repository, delegate the executable plan to `kenergy:plan-writer`, validate Global Constraints and Interfaces, then hand it to `/build-like-ken` for continuous execution.
+> I'm entering plan-like-ken mode. The approved design authorizes planning. I'll inspect the repository, delegate the executable plan to `kenergy:plan-writer`, validate its constraints and task contracts, then hand it to `/build-like-ken` for continuous execution.
 
 ## Transitions
 
-**Done when:** A plan is saved under `docs/plans/`, contains Global Constraints
-and task Interfaces, and has been handed directly to continuous execution.
+**Done when:** One plan is saved under `docs/plans/`, contains Global Constraints
+and complete task contracts, and has been handed directly to continuous
+execution.
 
 **Golden path:** `/build-like-ken`
 - Use `mode(operation='set', name='build-like-ken')` to transition.

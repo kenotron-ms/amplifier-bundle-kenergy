@@ -87,6 +87,9 @@ stages:
           - Each task MUST be completable in 2-5 minutes
           - If a task is larger, break it into smaller sub-tasks
           - Group related tasks logically
+          - Plans with more than 15 tasks MUST remain one plan document. Organize
+            them under ordered `## Phase N: [Phase Name]` section headers for
+            readability; do not create separate phase files or a phase manifest.
           - Order tasks by dependency
           - Every task MUST specify its verification method — no "test it manually"
           - Select model-role recommendations from the task's actual integration
@@ -218,6 +221,11 @@ stages:
               `review_model_role`, and `escalated_model_role` values for every
               task. Select roles by engineering judgment based on integration and
               design risk, not task duration or file count.
+          13. If the plan has more than 15 tasks, keep every task in this single
+              plan document and organize them under ordered
+              `## Phase N: [Phase Name]` section headers. Never create separate
+              phase files or a phase manifest; the executor parses and runs every
+              task from this one saved plan sequentially.
 
           RED FLAGS (correct before returning the plan):
           - Any task missing or leaving blank Description, Goal, Specification,
@@ -262,7 +270,9 @@ stages:
              (Use today's date for YYYY-MM-DD)
           3. Use the filesystem tools to write the file
           4. Preserve the plan content exactly, including its Global Constraints,
-             Interfaces, and model-role blocks
+             Interfaces, model-role blocks, and any organizational phase headings
+          5. Save the complete plan as this one file; never split phase sections
+             into separate plan files
 
           After saving, respond with ONLY the normalized repository-relative path
           string, for example:
