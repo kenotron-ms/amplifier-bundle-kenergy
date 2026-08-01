@@ -10,9 +10,9 @@ amplifier bundle add git+https://github.com/kenotron-ms/amplifier-bundle-kenergy
 
 ## What You Get
 
-### Three Interlocking Modes
+### Four Workflow Phases
 
-The modes form a complete development loop. Use them in order.
+The phases form a complete development loop. Use them in order.
 
 **`/think-like-ken`** — Design before code.
 
@@ -23,18 +23,21 @@ converses, the agent writes the artifact.
 
 **`/plan-like-ken`** — Direct planning from the approved design.
 
-Reads the approved design, maps dependencies, and decides the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation directly to `kenergy:plan-writer`.
+Reads the approved design, maps dependencies, and decides the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation directly to `kenergy:plan-writer`, then hands the saved plan automatically to continuous execution.
 
 **`/build-like-ken`** — Continuous execution with real verification.
 
 For each task: `kenergy:implementer` → merged `kenergy:reviewer` → bounded resume/escalate/adjudicate remediation loop, continuing through the plan without an approval gate between tasks. The orchestrator never writes code. Real execution output is required. Mocks-only = not verified.
 
+**`/finish`** — Make the final integration decision.
+
+After verified execution, choose once: merge, open a PR, keep the branch, or discard it.
+
 ```
-/think-like-ken  →  Design saved to docs/plans/
-    ↓
-/plan-like-ken  →  Plan saved to docs/plans/
-    ↓
-/build-like-ken  →  All tasks implemented, verified, committed
+/think-like-ken -> consolidated design review -> one approval
+/plan-like-ken  -> direct plan generation -> automatic execution handoff
+/build-like-ken -> implementer -> three-axis reviewer -> bounded fix loop
+/finish         -> merge / PR / keep / discard decision
 ```
 
 ### Five Persona Reviewer Skills

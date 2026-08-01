@@ -19,13 +19,14 @@ Opinionated development workflow for people who believe that:
 
 ## What You Get
 
-**Three interlocking modes** that form a complete development loop:
+**Four workflow phases** that form a complete development loop:
 
 | Mode | What it does |
 |------|-------------|
-| `/think-like-ken` | Explore evidence → batch genuine user-only forks → decide engineering questions → one TL;DR review and approval |
-| `/plan-like-ken` | Generate an implementation plan directly from the approved design; no task-breakdown discussion |
-| `/build-like-ken` | Implementer → merged `kenergy:reviewer` (three axes) → bounded resume/escalate fix loop |
+| `/think-like-ken` | Consolidated design review → one approval |
+| `/plan-like-ken` | Direct plan generation → automatic execution handoff |
+| `/build-like-ken` | Implementer → three-axis `kenergy:reviewer` → bounded fix loop |
+| `/finish` | Merge / PR / keep / discard decision |
 
 **Five persona reviewer skills** you can load at any checkpoint:
 
