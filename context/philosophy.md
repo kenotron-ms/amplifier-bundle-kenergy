@@ -135,7 +135,7 @@ When you catch yourself thinking any of these, STOP:
 
 ## The Goal
 
-Superpowers isn't about following rules for their own sake. It's about:
+Kenergy isn't about following rules for their own sake. It's about:
 
 1. **Higher quality** - Fewer bugs, more reliable software
 2. **Faster delivery** - Less debugging, less rework

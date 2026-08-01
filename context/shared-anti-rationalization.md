@@ -35,12 +35,18 @@ Before claiming any task is complete:
 
 ## The Three-Fix Escalation
 
-If you find yourself making a third fix to the same problem, stop.
+If you find yourself making a third fix to the same problem, stop blind patching.
 
-Three or more fixes to the same area signals an architectural issue, not an implementation detail. At that point:
+Three or more fixes to the same area signal an architectural or root-cause issue,
+not an implementation detail. At that point:
 
-- Stop writing fixes.
-- Question the architecture — something deeper is wrong.
-- Discuss with the user before proceeding.
+- Stop applying speculative fixes.
+- Reassess the root cause and architecture from the evidence gathered so far.
+- Follow the task's bounded resume/escalate/adjudicate loop; do not invent a
+  separate escalation path or a progress checkpoint.
+- Escalate to the user only when the reassessment reveals a genuine user-only
+  decision, or when the loop reaches its defined cap with an actual `BLOCKED`
+  condition. Its own adjudication handles non-load-bearing findings.
 
-Continuing to apply patches when fixes keep failing is a form of false progress. Escalate instead.
+Repeated failed fixes are a signal to deepen the investigation, not to interrupt
+the user by default.
