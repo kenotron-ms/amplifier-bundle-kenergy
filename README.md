@@ -25,9 +25,9 @@ converses, the agent writes the artifact.
 
 Review the design doc, map dependencies, decide the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation to `kenergy:plan-writer`.
 
-**`/build-like-ken`** — Three-agent execution with real verification.
+**`/build-like-ken`** — Continuous execution with real verification.
 
-For each task in the plan: implementer → verifier → code-quality-reviewer. The orchestrator never writes code. Real execution output is required. Mocks-only = not verified.
+For each task: implementer → merged three-axis `kenergy:reviewer` → bounded resume/escalate/adjudicate remediation loop. The orchestrator never writes code. Real execution output is required. Mocks-only = not verified.
 
 ```
 /think-like-ken  →  Design saved to docs/plans/
