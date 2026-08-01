@@ -355,12 +355,14 @@ steps:
     parse_json: true
     output: "review_resolution"
 
-  # --- 2b: Uniform five-round packet review and bounded remediation lifecycle ---
+  # --- 2b: Uniform five-remediation-attempt packet review and bounded lifecycle ---
   - id: "review-fix-loop"
     condition: "{{task_already_done}} != 'true' and {{review_resolution.outcome}} == 'PENDING'"
     while_condition: "true"
     break_when: "{{review_resolution.terminal}} == 'true'"
-    max_while_iterations: 5
+    # Iterations 1-5 can remediate findings; iteration 6 re-reviews the fifth
+    # fix and adjudicates without dispatching a sixth fix.
+    max_while_iterations: 6
     steps:
       # Every review round begins from the durable task base SHA through current HEAD.
       - id: "build-review-package"
@@ -499,7 +501,10 @@ steps:
                   "advisory_findings": advisory_findings,
                   "blocker": "review reported REVIEW: PASS while retaining [LOAD-BEARING] findings",
               }
-          elif round_number >= 5 and no_load_bearing:
+          # The cap re-review is iteration 6, after round 5 has had its
+          # escalated fix attempt. Do not adjudicate a failed fifth review
+          # before that fix can run.
+          elif round_number >= 6 and no_load_bearing:
               resolution = {
                   "outcome": "APPROVED_WITH_PARKED",
                   "no_load_bearing": "true",
@@ -508,7 +513,7 @@ steps:
                   "advisory_findings": advisory_findings,
                   "blocker": "",
               }
-          elif round_number >= 5:
+          elif round_number >= 6:
               blocker = load_bearing_findings
               if not blocker and unclassified_failure:
                   blocker = "review failed without classified [LOAD-BEARING] or [ADVISORY] findings"
@@ -567,7 +572,7 @@ steps:
 
       # Rounds 4-5 use a fresh escalated implementer only after the original session budget.
       - id: "escalate-implementer-coding"
-        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{current_task.escalated_model_role}} == 'coding'"
+        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{_loop_iteration}} <= 5 and {{current_task.escalated_model_role}} == 'coding'"
         agent: "kenergy:implementer"
         model_role: "coding"
         prompt: &escalated_fix_prompt |
@@ -616,7 +621,7 @@ steps:
           max_delay: 120
 
       - id: "escalate-implementer-reasoning"
-        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{current_task.escalated_model_role}} == 'reasoning'"
+        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{_loop_iteration}} <= 5 and {{current_task.escalated_model_role}} == 'reasoning'"
         agent: "kenergy:implementer"
         model_role: "reasoning"
         prompt: *escalated_fix_prompt
@@ -629,7 +634,7 @@ steps:
           max_delay: 120
 
       - id: "escalate-implementer-critical-ops"
-        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{current_task.escalated_model_role}} == 'critical-ops'"
+        condition: "{{review_resolution.outcome}} == 'PENDING' and {{_loop_iteration}} >= 4 and {{_loop_iteration}} <= 5 and {{current_task.escalated_model_role}} == 'critical-ops'"
         agent: "kenergy:implementer"
         model_role: "critical-ops"
         prompt: *escalated_fix_prompt
@@ -730,8 +735,8 @@ steps:
         parse_json: true
         output: "review_resolution"
 
-  # A blocked initial report, bad session ID, failed resume, or fifth load-bearing
-  # review is terminal and must never write a ledger completion entry.
+  # A blocked initial report, bad session ID, failed fix, or cap re-review with
+  # load-bearing findings is terminal and must never write a ledger completion entry.
   - id: "stop-on-blocked-outcome"
     condition: "{{task_already_done}} != 'true' and {{review_resolution.outcome}} == 'BLOCKED'"
     type: "bash"
@@ -761,7 +766,6 @@ steps:
       brief_path = Path(os.environ["TASK_BRIEF_PATH"]).expanduser()
       base_path = Path(os.environ["TASK_BASE_SHA_PATH"]).expanduser()
       task_id = os.environ["TASK_ID"].strip()
-      task_slug = os.environ["TASK_SLUG"]
       status = os.environ["IMPLEMENTATION_STATUS"]
       outcome = os.environ["REVIEW_OUTCOME"]
       no_load_bearing = os.environ["NO_LOAD_BEARING"] == "true"
@@ -830,7 +834,6 @@ steps:
       PYEOF
     env:
       TASK_ID: "{{current_task.task_id}}"
-      TASK_SLUG: "{{task_state.task_slug}}"
       TASK_BRIEF_PATH: "{{task_state.task_brief_path}}"
       TASK_BASE_SHA_PATH: "{{task_state.task_base_sha_path}}"
       PLAN_IDENTITY: "{{plan_identity}}"
