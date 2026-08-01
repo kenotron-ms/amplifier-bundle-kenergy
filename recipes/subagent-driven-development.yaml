@@ -207,7 +207,13 @@ stages:
                   tid = task.get("task_id", "UNKNOWN")
                   print(f"ERROR: plan_data.tasks[{i}] (task_id={tid!r}) missing keys: {sorted(missing)}", file=sys.stderr)
                   sys.exit(1)
-              for field in ("goal", "interfaces"):
+              for field in (
+                  "description",
+                  "goal",
+                  "spec",
+                  "acceptance_criteria",
+                  "interfaces",
+              ):
                   if not isinstance(task[field], str) or not task[field].strip():
                       print(
                           f"ERROR: plan_data.tasks[{i}] {field} must be a non-empty string",
