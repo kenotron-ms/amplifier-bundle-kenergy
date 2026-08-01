@@ -10,7 +10,7 @@
 #
 # Approval Gates (2):
 #   1. After design - approve before planning
-#   2. After branch review - choose finish action (merge/PR/keep/discard)
+#   2. After branch review - choose finish action (merge/PR/keep)
 
 name: "kenergy-full-development-cycle"
 description: "Complete development workflow with design and finish checkpoints around continuous VDD execution"
@@ -35,9 +35,34 @@ stages:
       - id: "setup-paths"
         type: "bash"
         command: |
-          DATE=$(date +%Y-%m-%d)
-          FEATURE_SLUG=$(echo "{{feature_name}}" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
-          echo "{\"design_path\": \"docs/plans/${DATE}-${FEATURE_SLUG}-design.md\", \"plan_path\": \"docs/plans/${DATE}-${FEATURE_SLUG}-plan.md\", \"branch_name\": \"feature/${FEATURE_SLUG}\", \"feature_slug\": \"${FEATURE_SLUG}\"}"
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import re
+          from time import strftime
+
+          feature_name = os.environ["FEATURE_NAME"].strip().lower()
+          feature_slug = re.sub(r"[^a-z0-9]+", "-", feature_name).strip("-")
+          if not feature_slug:
+              raise SystemExit(
+                  "BLOCKED: feature_name must contain at least one alphanumeric character"
+              )
+
+          current_date = strftime("%Y-%m-%d")
+          print(
+              json.dumps(
+                  {
+                      "design_path": f"docs/plans/{current_date}-{feature_slug}-design.md",
+                      "plan_path": f"docs/plans/{current_date}-{feature_slug}-plan.md",
+                      "branch_name": f"feature/{feature_slug}",
+                      "feature_slug": feature_slug,
+                  }
+              )
+          )
+          PYEOF
+        env:
+          FEATURE_NAME: "{{feature_name}}"
         parse_json: true
         output: "paths"
         timeout: 30
@@ -46,9 +71,11 @@ stages:
       - id: "ensure-dirs"
         type: "bash"
         command: |
-          set -e
-          mkdir -p "{{project_path}}/docs/plans"
-          echo "Created docs/plans directory"
+          set -eu
+          mkdir -p -- "$PROJECT_PATH/docs/plans"
+          printf '%s\n' "Created docs/plans directory"
+        env:
+          PROJECT_PATH: "{{project_path}}"
         timeout: 30
 
       # Understand project context
@@ -119,10 +146,26 @@ stages:
       - id: "save-design"
         type: "bash"
         command: |
-          cat > "{{project_path}}/{{paths.design_path}}" << 'DESIGN_EOF'
-          {{design_content}}
-          DESIGN_EOF
-          echo "Saved design to {{paths.design_path}}"
+          set -eu
+          python3 - <<'PYEOF'
+          import os
+          from pathlib import Path
+
+          project = Path(os.environ["PROJECT_PATH"]).expanduser().resolve()
+          target = (project / os.environ["DESIGN_PATH"]).resolve()
+          try:
+              target.relative_to(project)
+          except ValueError:
+              raise SystemExit(f"BLOCKED: design path is outside project: {target}")
+
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(os.environ["DESIGN_CONTENT"], encoding="utf-8")
+          print(f"Saved design to {os.environ['DESIGN_PATH']}")
+          PYEOF
+        env:
+          PROJECT_PATH: "{{project_path}}"
+          DESIGN_PATH: "{{paths.design_path}}"
+          DESIGN_CONTENT: "{{design_content}}"
         output: "save_design_result"
         timeout: 60
 
@@ -168,7 +211,24 @@ stages:
       - id: "load-design"
         type: "bash"
         command: |
-          cat "{{project_path}}/{{paths.design_path}}"
+          set -eu
+          python3 - <<'PYEOF'
+          import os
+          from pathlib import Path
+
+          project = Path(os.environ["PROJECT_PATH"]).expanduser().resolve()
+          design_path = (project / os.environ["DESIGN_PATH"]).resolve()
+          try:
+              design_path.relative_to(project)
+          except ValueError:
+              raise SystemExit(
+                  f"BLOCKED: design path is outside project: {design_path}"
+              )
+          print(design_path.read_text(encoding="utf-8"), end="")
+          PYEOF
+        env:
+          PROJECT_PATH: "{{project_path}}"
+          DESIGN_PATH: "{{paths.design_path}}"
         output: "design_doc"
         timeout: 30
 
@@ -177,53 +237,46 @@ stages:
         agent: "kenergy:plan-writer"
         model_role: "reasoning"
         prompt: |
-          Create a detailed VDD implementation plan for: {{feature_name}}
-          
-          Design document:
-          {{design_doc}}
-          
-          Create a plan with bite-sized tasks. Each task should:
-          - Be completable in one focused session (2-5 minutes)
-          - Have clear success criteria
-          - Specify its verification method explicitly (VDD hierarchy)
-          - Be independently verifiable
-          
-          VDD hierarchy — pick the cheapest that genuinely proves the claim:
-          1. Static analysis (ruff/ty/tsc) — always free
-          2. Run the code directly — scripts, CLIs
-          3. curl/HTTP call against running server — endpoints
-          4. Browser via playwright-cli — UI changes
-          5. DTU/Reality Check — true isolation
-          
-          Format as markdown with:
-          > **For execution:** Use `/build-like-ken` mode.
+          Create the complete VDD implementation plan for the approved design below.
 
-          **Goal:** [Brief summary]
-          **Verification approach:** [End-to-end verification strategy]
-          
-          ## Tasks
-          ### Task 1: [Name]
-          **Files:** [files to create/modify]
-          **Implementation** [complete code]
-          **Static Analysis** [command]
-          **Verification** [exact command and expected output]
-          **Commit** [git add ... && git commit -m "..."]
-          
-          ### Task 2: [Name]
-          ...
-          
-          ## Dependencies
-          Note any task dependencies or required order
+          Feature: {{feature_name}}
+
+          Approved design:
+          {{design_doc}}
+
+          Follow your canonical implementation-plan contract exactly. Do not
+          invent or maintain a separate task format for this recipe. Preserve
+          every required global constraint, task contract field, interface,
+          model-role recommendation, complete implementation, verification
+          command, and dependency ordering from your agent instructions.
+
+          Return only the complete plan markdown.
         output: "plan_content"
 
       # Save plan document
       - id: "save-plan"
         type: "bash"
         command: |
-          cat > "{{project_path}}/{{paths.plan_path}}" << 'PLAN_EOF'
-          {{plan_content}}
-          PLAN_EOF
-          echo "Saved plan to {{paths.plan_path}}"
+          set -eu
+          python3 - <<'PYEOF'
+          import os
+          from pathlib import Path
+
+          project = Path(os.environ["PROJECT_PATH"]).expanduser().resolve()
+          target = (project / os.environ["PLAN_PATH"]).resolve()
+          try:
+              target.relative_to(project)
+          except ValueError:
+              raise SystemExit(f"BLOCKED: plan path is outside project: {target}")
+
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_text(os.environ["PLAN_CONTENT"], encoding="utf-8")
+          print(f"Saved plan to {os.environ['PLAN_PATH']}")
+          PYEOF
+        env:
+          PROJECT_PATH: "{{project_path}}"
+          PLAN_PATH: "{{paths.plan_path}}"
+          PLAN_CONTENT: "{{plan_content}}"
         output: "save_plan_result"
         timeout: 60
 
@@ -303,7 +356,10 @@ stages:
         type: "bash"
         cwd: "{{execution_target.path}}"
         command: |
-          cat "{{execution_target.plan_path}}"
+          set -eu
+          cat -- "$PLAN_PATH"
+        env:
+          PLAN_PATH: "{{execution_target.plan_path}}"
         output: "plan_doc"
         timeout: 30
 
@@ -361,15 +417,18 @@ stages:
         type: "bash"
         cwd: "{{execution_target.path}}"
         command: |
-          echo "=== Implementation Summary ===" && \
-          echo "Branch: {{paths.branch_name}}" && \
-          echo "Worktree: {{execution_target.path}}" && \
+          printf '%s\n' "=== Implementation Summary ===" && \
+          printf 'Branch: %s\n' "$BRANCH_NAME" && \
+          printf 'Worktree: %s\n' "$WORKTREE_PATH" && \
           echo "" && \
           echo "=== Changes ===" && \
           git diff --stat main 2>/dev/null || git diff --stat HEAD~5 2>/dev/null || echo "Unable to show diff" && \
           echo "" && \
           echo "=== Verification Status ===" && \
           (python -m pytest --tb=no -q 2>/dev/null || echo "Run verification commands from plan manually to confirm")
+        env:
+          BRANCH_NAME: "{{paths.branch_name}}"
+          WORKTREE_PATH: "{{execution_target.path}}"
         output: "implementation_summary"
         timeout: 120
         on_error: "continue"
@@ -454,20 +513,26 @@ stages:
       - id: "final-summary"
         type: "bash"
         command: |
-          echo "============================================"
-          echo "  KENERGY DEVELOPMENT CYCLE COMPLETE"
-          echo "============================================"
-          echo ""
-          echo "Feature: {{feature_name}}"
-          echo "Action: {{finish_action.action}}"
-          echo ""
-          echo "Artifacts:"
-          echo "  Design: {{paths.design_path}}"
-          echo "  Plan: {{paths.plan_path}}"
-          echo ""
-          echo "{{finish_result}}"
-          echo ""
-          echo "============================================"
+          printf '%s\n' "============================================"
+          printf '%s\n' "  KENERGY DEVELOPMENT CYCLE COMPLETE"
+          printf '%s\n' "============================================"
+          printf '\n'
+          printf 'Feature: %s\n' "$FEATURE_NAME"
+          printf 'Action: %s\n' "$FINISH_ACTION"
+          printf '\n'
+          printf '%s\n' "Artifacts:"
+          printf '  Design: %s\n' "$DESIGN_PATH"
+          printf '  Plan: %s\n' "$PLAN_PATH"
+          printf '\n'
+          printf '%s\n' "$FINISH_RESULT"
+          printf '\n'
+          printf '%s\n' "============================================"
+        env:
+          FEATURE_NAME: "{{feature_name}}"
+          FINISH_ACTION: "{{finish_action.action}}"
+          DESIGN_PATH: "{{paths.design_path}}"
+          PLAN_PATH: "{{paths.plan_path}}"
+          FINISH_RESULT: "{{finish_result}}"
         output: "final_output"
         timeout: 30
         on_error: "continue"
