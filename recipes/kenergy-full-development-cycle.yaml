@@ -147,6 +147,7 @@ stages:
 
     # APPROVAL GATE 1: Approve design before planning
     approval:
+      required: true
       prompt: |
         ## Design Review
         
@@ -375,6 +376,7 @@ stages:
 
     # APPROVAL GATE 2: Choose finish action
     approval:
+      required: true
       prompt: |
         ## Implementation Complete
         

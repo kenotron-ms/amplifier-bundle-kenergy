@@ -201,7 +201,6 @@ stages:
               Review the supplied task goal and package on all three axes. Do not
               implement fixes, request a retry, or reconstruct the Git packet.
             output: "review_verdict"
-            on_error: "continue"
             timeout: 600
             retry:
               max_attempts: 2
@@ -215,7 +214,6 @@ stages:
             model_role: "critique"
             prompt: *review_prompt
             output: "review_verdict"
-            on_error: "continue"
             timeout: 600
             retry:
               max_attempts: 2
@@ -229,7 +227,6 @@ stages:
             model_role: "reasoning"
             prompt: *review_prompt
             output: "review_verdict"
-            on_error: "continue"
             timeout: 600
             retry:
               max_attempts: 2
@@ -269,7 +266,6 @@ stages:
           attention. This is a factual validation report for a human decision: do
           not recommend or implement code changes.
         output: "validation_report"
-        on_error: "continue"
         retry:
           max_attempts: 2
           backoff: exponential
