@@ -15,8 +15,6 @@ mode:
       - LSP
       - python_check
       - delegate
-      - recipes
-      - bash
   
   default_action: block
   allowed_transitions: [plan-like-ken, debug]
@@ -79,7 +77,7 @@ Before starting Phase 1, check for relevant skills: `load_skill(search="brainsto
 ### Phase 1: Understand Context
 
 Before asking a question:
-- Check the current project state (files, docs, recent commits)
+- Check the current project state with the safe read and code-intelligence tools
 - Read referenced documents or existing designs
 - Gather relevant evidence, precedent, and research
 - State what you understand about the project context
@@ -106,9 +104,13 @@ For each engineering decision with a defensible answer:
 
 Once zero non-AI-decidable choices remain, use the consolidated pattern that governed the review-architecture design:
 
+If synthesis reveals a genuinely new user-only fork, return briefly to Phase 2
+and resolve it before continuing. Never present the final TL;DR while a genuine
+fork is unresolved.
+
 1. Recommend the complete design from the evidence.
 2. When useful, critique the recommendation inline through `restless-old-brian` or another appropriate persona lens, then incorporate substantive criticism.
-3. Present one TL;DR-style review covering the goal, recommended approach, key components, important trade-offs, evidence-backed decisions, and any remaining genuine forks.
+3. Present one TL;DR-style review covering the goal, recommended approach, key components, important trade-offs, evidence-backed decisions, and resolved genuine forks.
 4. Ask for explicit approval to delegate the approved design to `kenergy:design-writer`.
 
 This is the only user approval gate in this mode. Do not ask for section-level approval or create another approval checkpoint after it.

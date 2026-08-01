@@ -23,7 +23,7 @@ Opinionated development workflow for people who believe that:
 
 | Mode | What it does |
 |------|-------------|
-| `/think-like-ken` | Explore → question → propose approaches → validate design section-by-section |
+| `/think-like-ken` | Explore evidence → batch genuine user-only forks → decide engineering questions → one TL;DR review and approval |
 | `/plan-like-ken` | Review design → discuss task breakdown → delegate plan creation to an agent |
 | `/build-like-ken` | Three-agent pipeline: implementer → verifier → code-quality-reviewer |
 

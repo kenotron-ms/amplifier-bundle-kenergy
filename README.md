@@ -16,7 +16,10 @@ The modes form a complete development loop. Use them in order.
 
 **`/think-like-ken`** — Design before code.
 
-Explore requirements through dialogue (one question at a time), propose 2–3 approaches with trade-offs, validate the design section-by-section before writing a word of code. Delegates document creation to `kenergy:design-writer` — the orchestrator converses, the agent writes the artifact.
+Explore evidence, batch genuine user-only questions by topic, and decide engineering
+questions directly. Present one consolidated TL;DR review for explicit approval,
+then delegate document creation to `kenergy:design-writer` — the orchestrator
+converses, the agent writes the artifact.
 
 **`/plan-like-ken`** — Plan before implementation.
 
@@ -144,9 +147,12 @@ The modes use a split-responsibility architecture:
 
 This preserves real-time dialogue for what it's good at, and uses focused agents for what they're good at.
 
-### One Question at a Time
+### Genuine Forks Only
 
-`/think-like-ken` enforces this hard. Ask one question. Wait for the answer. Ask the next question. A "questionnaire" approach produces half-answers to six questions instead of full answers to three.
+`/think-like-ken` interrupts the user only for personal preferences or facts only
+they know, batching related questions by topic. It decides evidence-backed
+engineering questions directly, then presents one consolidated TL;DR design
+review for a single approval.
 
 ## License
 

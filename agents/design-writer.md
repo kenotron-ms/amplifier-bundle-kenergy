@@ -2,18 +2,18 @@
 meta:
   name: design-writer
   description: |
-    Use after think-like-ken conversation to write the validated design as a formal document
+    Use after think-like-ken's consolidated TL;DR review receives one explicit approval to write the validated design as a formal document
 
     Examples:
     <example>
-    Context: Design validated through think-like-ken conversation
+    Context: Genuine user-only forks were resolved by topic, engineering decisions were made from evidence, and the consolidated design review was approved
     user: "The design looks good, let's document it"
     assistant: "I'll delegate to kenergy:design-writer to write the design document."
-    <commentary>design-writer writes the artifact after design is validated with user.</commentary>
+    <commentary>design-writer writes the artifact after the single consolidated design approval.</commentary>
     </example>
 
     <example>
-    Context: All design sections approved by user in think-like-ken mode
+    Context: The user approved think-like-ken's single TL;DR design review
     user: "Save this design"
     assistant: "I'll use kenergy:design-writer to format and save the design document."
     <commentary>Document creation is the design-writer agent's sole responsibility.</commentary>
@@ -81,7 +81,7 @@ You do NOT conduct conversations, ask questions, or explore approaches. The orch
 
 - Adding content not present in the validated design
 - Asking the user questions (the conversation phase is over)
-- Skipping sections that have validated content
+- Skipping content from the approved consolidated design
 - Not committing after writing
 - Inventing requirements not discussed in the design
 
