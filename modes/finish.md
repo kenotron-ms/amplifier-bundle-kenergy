@@ -46,6 +46,22 @@ See `foundation:docs/PER_REPO_CONVENTIONS.md` for the principle.
 
 ## The Process
 
+### Capture Entry Paths
+
+Before Step 1, before any `cd`, `git checkout`, or worktree removal, capture the
+entry paths once:
+
+```bash
+worktree_path="$(git rev-parse --show-toplevel)"
+feature_branch="$(git branch --show-current)"
+git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+main_repo_path="$(dirname "$git_common_dir")"
+```
+
+Treat these values as immutable for the remainder of the finish operation.
+Never recompute the worktree path after a checkout or cleanup changes the
+directory state.
+
 ### Step 1: Verify Implementation
 
 Before presenting any options, verify the implementation is working:
@@ -146,13 +162,14 @@ Which option?
 Re-read `AGENTS.md` and confirm every gate it requires for merge (smoke test on fresh environment, live-run evidence, integration scenario, etc.) is satisfied. If any gate is unmet, surface the gap to the user and STOP until it is addressed.
 
 ```bash
+cd "$main_repo_path"
 git checkout <base-branch>
 git pull
-git merge --ff-only <feature-branch>
+git merge --ff-only "$feature_branch"
 # If fast-forward merge fails (branch has diverged):
 #   "Fast-forward merge not possible — branch has diverged from <base-branch>."
 #   Offer: (a) Create a PR instead (Option 2)
-#          (b) Regular merge: git merge <feature-branch>
+#          (b) Regular merge: git merge "$feature_branch"
 #          (c) Rebase first: git rebase <base-branch> from feature branch
 #   Wait for user choice before proceeding.
 #
@@ -164,11 +181,14 @@ git merge --ff-only <feature-branch>
 # Run verification on merged result
 <verification command>
 # If verification passes
-git branch -d <feature-branch>
-git push origin --delete <feature-branch> 2>/dev/null  # Clean up remote if pushed
+cd "$main_repo_path"
+git worktree remove "$worktree_path"
+git branch -d "$feature_branch"
+git push origin --delete "$feature_branch" 2>/dev/null  # Clean up remote if pushed
 ```
 
-Then: Check if in worktree and clean up if applicable.
+The worktree removal must use the captured path above; do not recompute it
+after the checkout.
 
 #### Option 2: PR
 
@@ -185,7 +205,7 @@ Before approving the PR creation:
 3. For every checkbox in the template, confirm the evidence exists. If any item is not addressed, surface the unchecked items to the user and STOP until they are addressed or the user explicitly waives them.
 
 ```bash
-git push -u origin <feature-branch>
+git push -u origin "$feature_branch"
 # If a PR template exists, the body MUST be derived from it (with checklist items honored).
 # The block below is the fallback ONLY when no template is present.
 gh pr create --title "<title>" --body "$(cat <<'EOF'
@@ -211,9 +231,9 @@ Do NOT clean up anything.
 **Confirm first — require typed confirmation:**
 ```
 This will permanently delete:
-- Branch: <name>
+- Branch: $feature_branch
 - All commits: <commit-list>
-- Worktree at <path> (if applicable)
+- Worktree at $worktree_path (if applicable)
 
 Type 'discard' to confirm.
 ```
@@ -222,26 +242,32 @@ Wait for exact confirmation. If not confirmed, do nothing.
 
 If confirmed:
 ```bash
+cd "$main_repo_path"
+git worktree remove "$worktree_path" --force
 git checkout <base-branch>
-git branch -D <feature-branch>
-git push origin --delete <feature-branch> 2>/dev/null  # Clean up remote if pushed
+git branch -D "$feature_branch"
+git push origin --delete "$feature_branch" 2>/dev/null  # Clean up remote if pushed
 ```
 
-Then: Clean up worktree if applicable.
+The worktree removal must use the captured path above; do not recompute it
+after the checkout.
 
 ### Step 6: Worktree Cleanup
 
-For Options 1, 2, and 4 — check if in worktree:
+For Options 1 and 4, if the selected option did not already remove the
+worktree, check it from the captured main repository:
 ```bash
+cd "$main_repo_path"
 git worktree list
 ```
 
 If in a worktree, remove it:
 ```bash
-git worktree remove <worktree-path>
+cd "$main_repo_path"
+git worktree remove "$worktree_path"
 ```
 
-For Option 3 — keep worktree.
+For PR and KEEP — keep worktree.
 
 ## Recipe Alternative
 

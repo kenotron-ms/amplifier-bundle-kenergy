@@ -35,18 +35,55 @@ stages:
   # ============================================================================
   - name: "verify-and-summarize"
     steps:
+      - id: "capture-entry-paths"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          supplied = "{{worktree_path}}".strip()
+          worktree = Path(supplied).expanduser().resolve() if supplied else Path(
+              subprocess.check_output(
+                  ["git", "rev-parse", "--show-toplevel"], text=True
+              ).strip()
+          ).resolve()
+          branch = "{{branch_name}}".strip() or subprocess.check_output(
+              ["git", "-C", str(worktree), "branch", "--show-current"], text=True
+          ).strip()
+          common = Path(subprocess.check_output(
+              ["git", "-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+              text=True,
+          ).strip()).resolve()
+          main_repo = common.parent
+          print(json.dumps({
+              "worktree_path": str(worktree),
+              "branch_name": branch,
+              "main_repo_path": str(main_repo),
+          }))
+          PYEOF
+        parse_json: true
+        output: "entry_paths"
+
       - id: "detect-branch-info"
         agent: "foundation:git-ops"
+        model_role: "fast"
         prompt: |
-          Detect the current branch and worktree information.
+          Inspect branch metadata using the immutable entry paths captured before
+          any directory-changing operation:
 
-          If branch_name is provided: {{branch_name}}
-          If worktree_path is provided: {{worktree_path}}
+          - Entry worktree: {{entry_paths.worktree_path}}
+          - Entry branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
 
-          If not provided, auto-detect:
-          1. Get current branch name with: git branch --show-current
-          2. Get worktree path with: git rev-parse --show-toplevel
-          3. Check if we're in a worktree: git rev-parse --git-common-dir
+          Run inspection commands from:
+            cd "{{entry_paths.worktree_path}}"
+
+          Do not recompute the entry worktree path or entry branch. Use the
+          captured values above verbatim.
 
           Also gather:
           - The main branch name (usually 'main' or 'master')
@@ -58,10 +95,18 @@ stages:
 
       - id: "verify-implementation"
         agent: "kenergy:implementer"
+        model_role: "coding"
         prompt: |
           Verify the implementation is ready for completion.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           Branch info: {{branch_info}}
+
+          Run all verification commands from:
+            cd "{{entry_paths.worktree_path}}"
 
           Run verification:
           1. Static analysis first (ruff, ty, tsc, oxlint — whatever applies)
@@ -75,11 +120,19 @@ stages:
         output: "verification_results"
 
       - id: "summarize-changes"
-        agent: "kenergy:quality-reviewer"
+        agent: "kenergy:code-reviewer"
+        model_role: "critique"
         prompt: |
           Summarize the changes made on this branch.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           Branch info: {{branch_info}}
+
+          Run all change-summary commands from:
+            cd "{{entry_paths.worktree_path}}"
 
           Gather and analyze:
           1. Run: git diff main...HEAD --stat (or appropriate main branch)
@@ -89,7 +142,7 @@ stages:
           Create a clear summary including:
 
           ## Implementation Summary
-          - Branch: [branch name]
+          - Branch: {{entry_paths.branch_name}}
           - Commits: [count] commits ahead of main
           - Files changed: [count]
 
@@ -112,10 +165,15 @@ stages:
     steps:
       - id: "present-options"
         agent: "foundation:zen-architect"
+        model_role: "reasoning"
         mode: "ARCHITECT"
         prompt: |
           Present the finish options to the user based on verification results.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           Verification results: {{verification_results}}
           Change summary: {{change_summary}}
           Branch info: {{branch_info}}
@@ -198,8 +256,11 @@ stages:
     steps:
       - id: "determine-choice"
         agent: "foundation:git-ops"
+        model_role: "fast"
         prompt: |
           Determine which option the user selected.
+
+          The immutable entry branch is: {{entry_paths.branch_name}}
 
           The user should have indicated their choice (MERGE, PR, KEEP, or DISCARD)
           before approving the previous stage.
@@ -225,22 +286,37 @@ stages:
 
       - id: "execute-merge"
         agent: "foundation:git-ops"
+        model_role: "fast"
         condition: "{{user_choice.selected_option}} == 'MERGE' and {{user_choice.option_valid}} == 'true'"
         prompt: |
           Execute MERGE: Fast-forward merge to main.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           Branch info: {{branch_info}}
 
           Steps:
-          1. Ensure we're on the feature branch
+          1. Start in the captured main repository:
+             cd "{{entry_paths.main_repo_path}}"
           2. Fetch latest from origin
           3. Switch to main: git checkout main
           4. Pull latest main: git pull origin main
-          5. Merge the feature branch: git merge --ff-only <branch_name>
+          5. Merge the captured feature branch:
+             git merge --ff-only "{{entry_paths.branch_name}}"
              (Use --ff-only to ensure clean fast-forward)
           6. Push to origin: git push origin main
-          7. Delete the feature branch locally: git branch -d <branch_name>
-          8. Delete remote branch if it exists: git push origin --delete <branch_name>
+          7. Before deleting the branch, remove the captured worktree from the
+             captured main repository:
+             cd "{{entry_paths.main_repo_path}}"
+             git worktree remove "{{entry_paths.worktree_path}}"
+          8. Delete the feature branch locally:
+             git branch -d "{{entry_paths.branch_name}}"
+          9. Delete remote branch if it exists:
+             git push origin --delete "{{entry_paths.branch_name}}"
+
+          Never recompute the worktree path after checkout or removal.
 
           Report:
           - Merge successful: yes/no
@@ -248,31 +324,38 @@ stages:
           - Feature branch deleted: yes/no
           - Any issues encountered
 
-          Set needs_worktree_cleanup: true
+          Set needs_worktree_cleanup: false (already handled)
         output: "execution_result"
 
       - id: "execute-pr"
         agent: "foundation:git-ops"
+        model_role: "fast"
         condition: "{{user_choice.selected_option}} == 'PR'"
         prompt: |
           Execute PR: Create a pull request.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           Branch info: {{branch_info}}
           Change summary: {{change_summary}}
 
           Steps:
-          1. Ensure branch is pushed to origin:
-             git push -u origin <branch_name>
+          1. Work from the captured feature worktree:
+             cd "{{entry_paths.worktree_path}}"
+          2. Ensure branch is pushed to origin:
+             git push -u origin "{{entry_paths.branch_name}}"
 
-          2. Create PR using GitHub CLI:
-             gh pr create --title "<branch_name>" --body "<PR description>"
+          3. Create PR using GitHub CLI:
+             gh pr create --title "{{entry_paths.branch_name}}" --body "<PR description>"
 
              PR Description should include:
              - The change summary from {{change_summary}}
              - Verification status from {{verification_results}}
              - Any relevant notes
 
-          3. Report the PR URL
+          4. Report the PR URL
 
           If gh CLI is not available, provide the manual instructions.
 
@@ -281,20 +364,25 @@ stages:
 
       - id: "execute-keep"
         agent: "foundation:git-ops"
+        model_role: "fast"
         condition: "{{user_choice.selected_option}} == 'KEEP'"
         prompt: |
           Execute KEEP: Leave branch as-is.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           Branch info: {{branch_info}}
 
           Simply report the current status:
-          - Branch name: [name]
-          - Worktree location: [path]
+          - Branch name: {{entry_paths.branch_name}}
+          - Worktree location: {{entry_paths.worktree_path}}
           - Commits ahead of main: [count]
           - Verification status: [from verification_results]
 
           Provide helpful commands for later:
-          - To resume work: cd <worktree_path>
+          - To resume work: cd "{{entry_paths.worktree_path}}"
           - To finish later: Execute kenergy:recipes/finish-branch.yaml
           - To check status: git status
 
@@ -303,29 +391,42 @@ stages:
 
       - id: "execute-discard"
         agent: "foundation:git-ops"
+        model_role: "fast"
         condition: "{{user_choice.selected_option}} == 'DISCARD'"
         prompt: |
           Execute DISCARD: Delete branch and worktree.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           Branch info: {{branch_info}}
 
           WARNING: This is destructive! Confirm the branch name before proceeding.
 
           Steps:
-          1. Switch out of the worktree first (cd to main repo or another location)
-          2. Remove the worktree: git worktree remove <worktree_path> --force
-          3. Delete the local branch: git branch -D <branch_name>
-          4. Delete remote branch if pushed: git push origin --delete <branch_name>
+          1. Switch out of the worktree by entering the captured main repository:
+             cd "{{entry_paths.main_repo_path}}"
+          2. Remove the captured worktree:
+             git worktree remove "{{entry_paths.worktree_path}}" --force
+          3. Delete the local branch:
+             git branch -D "{{entry_paths.branch_name}}"
+          4. Delete remote branch if pushed:
+             git push origin --delete "{{entry_paths.branch_name}}"
+
+          Never recompute the worktree path after checkout or removal.
 
           Set needs_worktree_cleanup: false (already handled)
         output: "execution_result"
 
       - id: "handle-blocked-merge"
-        agent: "kenergy:verifier"
+        agent: "foundation:git-ops"
+        model_role: "fast"
         condition: "{{user_choice.selected_option}} == 'MERGE' and {{user_choice.option_valid}} == 'false'"
         prompt: |
           Handle blocked MERGE request.
 
+          The immutable entry branch is: {{entry_paths.branch_name}}
           User chose MERGE but it's not valid because: {{user_choice.reason}}
           Verification results: {{verification_results}}
 
@@ -360,22 +461,31 @@ stages:
     steps:
       - id: "cleanup-worktree"
         agent: "foundation:git-ops"
+        model_role: "fast"
         prompt: |
           Perform cleanup if needed.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           Execution result: {{execution_result}}
           Branch info: {{branch_info}}
           User choice: {{user_choice}}
 
           Check if worktree cleanup is needed:
-          - If MERGE was executed successfully -> Remove worktree
+          - If MERGE was executed successfully -> Worktree was already removed
           - If DISCARD was executed -> Worktree already removed
           - If PR or KEEP -> No cleanup needed
 
-          If cleanup needed:
-          1. Navigate out of worktree directory
-          2. Run: git worktree remove <worktree_path>
+          If execution_result explicitly requests cleanup:
+          1. Enter the captured main repository:
+             cd "{{entry_paths.main_repo_path}}"
+          2. Remove the captured worktree:
+             git worktree remove "{{entry_paths.worktree_path}}"
           3. Verify removal: git worktree list
+
+          Never recompute the worktree path after checkout or removal.
 
           Report what was cleaned up (if anything).
         output: "cleanup_result"
@@ -383,10 +493,15 @@ stages:
 
       - id: "final-summary"
         agent: "foundation:zen-architect"
+        model_role: "reasoning"
         mode: "ANALYZE"
         prompt: |
           Generate final summary of what was done.
 
+          Immutable entry paths:
+          - Worktree: {{entry_paths.worktree_path}}
+          - Branch: {{entry_paths.branch_name}}
+          - Main repository: {{entry_paths.main_repo_path}}
           User choice: {{user_choice}}
           Execution result: {{execution_result}}
           Cleanup result: {{cleanup_result}}
