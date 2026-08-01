@@ -24,8 +24,8 @@ Opinionated development workflow for people who believe that:
 | Mode | What it does |
 |------|-------------|
 | `/think-like-ken` | Explore evidence → batch genuine user-only forks → decide engineering questions → one TL;DR review and approval |
-| `/plan-like-ken` | Review design → discuss task breakdown → delegate plan creation to an agent |
-| `/build-like-ken` | Three-agent pipeline: implementer → verifier → code-quality-reviewer |
+| `/plan-like-ken` | Generate an implementation plan directly from the approved design; no task-breakdown discussion |
+| `/build-like-ken` | Implementer → merged `kenergy:reviewer` (three axes) → bounded resume/escalate fix loop |
 
 **Five persona reviewer skills** you can load at any checkpoint:
 

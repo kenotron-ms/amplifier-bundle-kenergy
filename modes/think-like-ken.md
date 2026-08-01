@@ -13,7 +13,6 @@ mode:
       - web_fetch
       - load_skill
       - LSP
-      - python_check
       - delegate
   
   default_action: block
@@ -203,7 +202,7 @@ When entering this mode, announce:
 **Done when:** The user has explicitly approved the consolidated design review and the design document is saved to `docs/plans/`
 
 **Golden path:** `/plan-like-ken`
-- Tell user: "Design complete and saved to [path]. Use `/plan-like-ken` to create an implementation plan, or I can run the full development cycle recipe to handle everything from here."
+- Tell user: "Design complete and saved to [path]. Use `/plan-like-ken` to create an implementation plan."
 - Use `mode(operation='set', name='plan-like-ken')` to transition. The first call will be denied (gate policy); call again to confirm.
 
 **Dynamic transitions:**
