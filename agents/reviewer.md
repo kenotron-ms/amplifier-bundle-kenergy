@@ -42,6 +42,15 @@ MISSING: TASK_GOAL
 ACTION: Re-dispatch with the task's specific goal/spec text.
 ```
 
+If `REVIEW PACKAGE` is missing or empty, stop. Do not reconstruct it. Return
+exactly:
+
+```text
+REVIEW: REFUSED
+MISSING: REVIEW_PACKAGE
+ACTION: Re-dispatch with the precomputed diff/log/stat review package.
+```
+
 Never run Git merely to reconstruct the packet. The controller owns that work.
 You may read named files and run an exact static-analysis or verification command
 when independent confirmation is needed.
