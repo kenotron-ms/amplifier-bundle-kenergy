@@ -7,7 +7,9 @@
 #
 # Context variables received from parent:
 #   current_task: The task object with task_id, description, spec, etc.
-#   project_brief: Auto-generated project context (may be empty for first task)
+#   plan_identity: Absolute path of the active implementation plan
+#   state_dir: Plan-scoped durable state directory
+#   ledger_path: Plan-scoped durable ledger
 
 name: "single-task-pipeline"
 description: "Per-task implementation pipeline: implement → status extract → tiered review → checkpoint"
@@ -17,7 +19,9 @@ tags: ["implementation", "per-task", "pipeline", "vdd", "review"]
 
 context:
   current_task: {}
-  project_brief: ""
+  plan_identity: ""
+  state_dir: ""
+  ledger_path: ""
   # Pipeline variable defaults (prevent undefined variable errors)
   impl_status: "SKIP"
   review_tier: "trivial"
@@ -27,36 +31,131 @@ context:
   task_already_done: "false"
 
 steps:
-  # --- 2.0a: Check if task already completed (checkpoint) ---
-  - id: "check-checkpoint"
+  # --- 2.0a: Check durable plan-scoped task completion state ---
+  - id: "check-task-complete"
     type: "bash"
     timeout: 30
     command: |
-      TASK_ID=$(cat <<'TASKID_DELIM' | tr -d '\n' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//'
-      {{current_task.task_id}}
-      TASKID_DELIM
+      set -eu
+      python3 - <<'PYEOF'
+      import os
+      import re
+      import subprocess
+      from pathlib import Path
+
+      ledger = Path(os.environ["LEDGER_PATH"]).expanduser()
+      if not ledger.is_file():
+          raise SystemExit(f"BLOCKED: ledger not found: {ledger}")
+
+      expected_first_line = f"# Plan: {os.environ['PLAN_IDENTITY']}"
+      lines = ledger.read_text(encoding="utf-8").splitlines()
+      if not lines or lines[0] != expected_first_line:
+          raise SystemExit(
+              "BLOCKED: ledger identity mismatch; refusing cross-plan state"
+          )
+
+      task_id = os.environ["TASK_ID"].strip()
+      entry_pattern = re.compile(
+          r"^- \[x\] (?P<task>.+?) — (?P<sha>[0-9a-f]+) — (?P<outcome>.+)$"
       )
-      if [ -f ".kenergy-checkpoint.json" ] && python3 -c "
-      import json, sys
-      with open('.kenergy-checkpoint.json') as f:
-          data = json.load(f)
-      sys.exit(0 if '$TASK_ID' in data.get('completed_tasks', []) else 1)
-      " 2>/dev/null; then
-        echo "true"
-      else
-        echo "false"
-      fi
+      ledger_shas = [
+          match.group("sha")
+          for line in lines
+          if (match := entry_pattern.match(line)) and match.group("task") == task_id
+      ]
+      log_prefixes = {
+          line.split(maxsplit=1)[0]
+          for line in subprocess.check_output(
+              ["git", "log", "--oneline"], text=True
+          ).splitlines()
+          if line.strip()
+      }
+
+      print(
+          "true"
+          if any(sha.startswith(prefix) for sha in ledger_shas for prefix in log_prefixes)
+          else "false"
+      )
+      PYEOF
+    env:
+      TASK_ID: "{{current_task.task_id}}"
+      PLAN_IDENTITY: "{{plan_identity}}"
+      LEDGER_PATH: "{{ledger_path}}"
     output: "task_already_done"
 
-  - id: "load-project-brief"
+  - id: "prepare-task-state"
+    type: "bash"
+    timeout: 30
+    command: |
+      set -eu
+      python3 - <<'PYEOF'
+      import json
+      import os
+      import re
+      import subprocess
+      from pathlib import Path
+
+      task_id = os.environ["TASK_ID"].strip()
+      slug = re.sub(r"[^a-z0-9]+", "-", task_id.lower()).strip("-")
+      if not slug:
+          raise SystemExit("BLOCKED: task ID produced an empty slug")
+
+      state_dir = Path(os.environ["STATE_DIR"])
+      brief_path = state_dir / "task-briefs" / f"{slug}.md"
+      base_path = state_dir / "task-briefs" / f"{slug}.base-sha"
+      brief = """# Task Brief: {task_id}
+
+      ## Goal
+      {description}
+
+      ## Specification
+      {specification}
+
+      ## Acceptance Criteria
+      {acceptance}
+
+      ## Interfaces
+      {interfaces}
+
+      ## Files
+      {files}
+      """.format(
+          task_id=task_id,
+          description=os.environ["TASK_DESCRIPTION"],
+          specification=os.environ["TASK_SPEC"],
+          acceptance=os.environ["TASK_ACCEPTANCE"],
+          interfaces=os.environ["TASK_INTERFACES"],
+          files=os.environ["TASK_FILES"],
+      )
+      brief_path.write_text(brief, encoding="utf-8")
+      if not base_path.exists():
+          base_path.write_text(
+              subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() + "\n",
+              encoding="utf-8",
+          )
+
+      print(json.dumps({
+          "task_slug": slug,
+          "task_brief_path": str(brief_path),
+          "task_base_sha_path": str(base_path),
+      }))
+      PYEOF
+    env:
+      TASK_ID: "{{current_task.task_id}}"
+      TASK_DESCRIPTION: "{{current_task.description}}"
+      TASK_SPEC: "{{current_task.spec}}"
+      TASK_ACCEPTANCE: "{{current_task.acceptance_criteria}}"
+      TASK_INTERFACES: "{{current_task.interfaces}}"
+      TASK_FILES: "{{current_task.files}}"
+      STATE_DIR: "{{state_dir}}"
+    parse_json: true
+    output: "task_state"
+
+  - id: "load-plan-brief"
     type: "bash"
     timeout: 10
     command: |
-      if [ -f ".kenergy-project-brief.txt" ]; then
-        cat .kenergy-project-brief.txt
-      else
-        echo ""
-      fi
+      cat "{{ledger_path}}"
     output: "project_brief"
 
   # --- 2a: Implement the task ---
@@ -466,70 +565,57 @@ steps:
       in the task summary so the human reviewer is aware during the approval gate.
     output: "quality_unresolved"
 
-  # --- 2d: Write checkpoint after successful task completion ---
-  - id: "write-checkpoint"
+  # --- 2d: Write plan-scoped ledger checkpoint after successful task completion ---
+  - id: "write-ledger-checkpoint"
     condition: "{{impl_status}} == 'DONE' or {{impl_status}} == 'DONE_WITH_CONCERNS'"
     type: "bash"
     timeout: 30
     command: |
-      TASK_ID=$(cat <<'TASKID_DELIM' | tr -d '\n' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//'
-      {{current_task.task_id}}
-      TASKID_DELIM
-      )
-      if [ ! -f ".kenergy-checkpoint.json" ]; then
-        echo '{"completed_tasks": []}' > .kenergy-checkpoint.json
-      fi
-      python3 -c "
-      import json
-      with open('.kenergy-checkpoint.json', 'r') as f:
-          data = json.load(f)
-      task_id = '$TASK_ID'
-      if task_id not in data.get('completed_tasks', []):
-          data.setdefault('completed_tasks', []).append(task_id)
-      with open('.kenergy-checkpoint.json', 'w') as f:
-          json.dump(data, f, indent=2)
-      print(f'Checkpoint saved: {task_id}')
-      "
+      set -eu
+      python3 - <<'PYEOF'
+      import os
+      import subprocess
+      from pathlib import Path
 
-  # --- 2e: Generate/update project briefing (self-caching) ---
-  - id: "update-project-briefing"
-    condition: "{{impl_status}} == 'DONE' or {{impl_status}} == 'DONE_WITH_CONCERNS'"
-    type: "bash"
-    timeout: 30
-    command: |
-      if [ ! -f ".kenergy-project-brief.txt" ]; then
-        BRIEF="PROJECT BRIEF (auto-generated after first task)\n"
-        BRIEF="${BRIEF}================================================\n"
-        # Test framework detection
-        if grep -rq "import pytest" --include="*.py" 2>/dev/null; then
-          BRIEF="${BRIEF}Test framework: pytest\n"
-          BRIEF="${BRIEF}Test command: pytest\n"
-        elif grep -rq "import unittest" --include="*.py" 2>/dev/null; then
-          BRIEF="${BRIEF}Test framework: unittest\n"
-          BRIEF="${BRIEF}Test command: python -m unittest discover\n"
-        elif [ -f "package.json" ]; then
-          BRIEF="${BRIEF}Test command: npm test\n"
-        elif [ -f "Cargo.toml" ]; then
-          BRIEF="${BRIEF}Test command: cargo test\n"
-        fi
-        # Static analysis tools detection
-        if [ -f "pyproject.toml" ] || [ -f "ruff.toml" ]; then
-          BRIEF="${BRIEF}Static analysis: ruff, ty\n"
-        elif [ -f "tsconfig.json" ]; then
-          BRIEF="${BRIEF}Static analysis: tsc\n"
-        fi
-        # Build/lint detection
-        if [ -f "pyproject.toml" ]; then
-          BRIEF="${BRIEF}Build config: pyproject.toml\n"
-        elif [ -f "Makefile" ]; then
-          BRIEF="${BRIEF}Build tool: make\n"
-        fi
-        # File patterns from recent changes
-        RECENT=$(git diff --name-only HEAD~1 2>/dev/null | head -10)
-        if [ -n "$RECENT" ]; then
-          BRIEF="${BRIEF}Recent files changed:\n${RECENT}\n"
-        fi
-        echo -e "$BRIEF" > .kenergy-project-brief.txt
-      fi
-      cat .kenergy-project-brief.txt
-    output: "project_brief"
+      ledger = Path(os.environ["LEDGER_PATH"]).expanduser()
+      brief_path = Path(os.environ["TASK_BRIEF_PATH"]).expanduser()
+      base_path = Path(os.environ["TASK_BASE_SHA_PATH"]).expanduser()
+      task_id = os.environ["TASK_ID"].strip()
+      task_slug = os.environ["TASK_SLUG"]
+      expected_first_line = f"# Plan: {os.environ['PLAN_IDENTITY']}"
+
+      if not ledger.is_file():
+          raise SystemExit(f"BLOCKED: ledger not found: {ledger}")
+      lines = ledger.read_text(encoding="utf-8").splitlines()
+      if not lines or lines[0] != expected_first_line:
+          raise SystemExit(
+              "BLOCKED: ledger identity mismatch; refusing cross-plan state"
+          )
+      if not brief_path.is_file():
+          raise SystemExit(f"BLOCKED: task brief not found: {brief_path}")
+      if brief_path.read_text(encoding="utf-8").splitlines()[0] != f"# Task Brief: {task_id}":
+          raise SystemExit("BLOCKED: task brief identity mismatch")
+      if not base_path.is_file():
+          raise SystemExit(f"BLOCKED: task base SHA not found: {base_path}")
+
+      base_sha = base_path.read_text(encoding="utf-8").strip()
+      head_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+      entry = f"- [x] {task_id} — {head_sha} — legacy-tiered-complete"
+      entry_prefix = f"- [x] {task_id} —"
+      if not any(line.startswith(entry_prefix) for line in lines):
+          try:
+              parked_index = lines.index("## Parked Findings")
+          except ValueError as error:
+              raise SystemExit("BLOCKED: ledger missing Parked Findings section") from error
+          lines[parked_index:parked_index] = [entry, ""]
+          ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+      print(f"Ledger checkpoint saved: {task_slug} (base {base_sha})")
+      PYEOF
+    env:
+      TASK_ID: "{{current_task.task_id}}"
+      TASK_SLUG: "{{task_state.task_slug}}"
+      TASK_BRIEF_PATH: "{{task_state.task_brief_path}}"
+      TASK_BASE_SHA_PATH: "{{task_state.task_base_sha_path}}"
+      PLAN_IDENTITY: "{{plan_identity}}"
+      LEDGER_PATH: "{{ledger_path}}"

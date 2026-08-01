@@ -63,10 +63,25 @@ stages:
           For each task, extract:
           - task_id: Unique identifier or name
           - description: What needs to be implemented
+          - goal: The intended outcome of the task
           - spec: The detailed specification/requirements
           - acceptance_criteria: How to verify the task is complete
+          - interfaces: Exact Consumes and Produces interfaces for this task
           - files: Files likely to be created or modified
           - dependencies: Any tasks this depends on (if applicable)
+          - implementation_model_role: Appropriate implementation role
+          - review_model_role: Appropriate review role
+          - escalated_model_role: Role for late fix-loop escalation
+
+          Select model roles by engineering judgment, NEVER by file count or word
+          count:
+          - Mechanical or isolated tasks: implementation role fast or coding.
+          - Integration, multi-file, or judgment-heavy tasks: implementation role coding.
+          - Architecture- or design-sensitive tasks: implementation role reasoning.
+          - Review role: fast for a low-risk mechanical diff, critique for ordinary
+            integration or risk, reasoning for architecture-sensitive review.
+          - Escalation must follow the ladder fast -> coding -> reasoning ->
+            critical-ops and be strictly above the implementation role.
 
           Return the result as a JSON object with this exact structure:
           {"tasks": [<array of task objects>], "total_tasks": <number>}
@@ -74,10 +89,15 @@ stages:
           Each task object in the array must have these keys:
           - "task_id": string
           - "description": string
+          - "goal": string
           - "spec": string (the detailed specification)
           - "acceptance_criteria": string
+          - "interfaces": string with exact Consumes and Produces interfaces
           - "files": array of file paths
           - "dependencies": array of task_ids (empty array if none)
+          - "implementation_model_role": "fast", "coding", or "reasoning"
+          - "review_model_role": "fast", "critique", or "reasoning"
+          - "escalated_model_role": "coding", "reasoning", or "critical-ops"
 
           The "tasks" key MUST contain the ordered array. Order by dependencies (independent first).
 
@@ -121,7 +141,21 @@ stages:
               print("ERROR: plan_data.tasks is empty - no tasks found in plan", file=sys.stderr)
               sys.exit(1)
 
-          REQUIRED = {"task_id", "description", "spec", "acceptance_criteria", "files"}
+          REQUIRED = {
+              "task_id",
+              "description",
+              "goal",
+              "spec",
+              "acceptance_criteria",
+              "interfaces",
+              "files",
+              "implementation_model_role",
+              "review_model_role",
+              "escalated_model_role",
+          }
+          IMPLEMENTATION_ROLE_ORDER = {"fast": 0, "coding": 1, "reasoning": 2}
+          REVIEW_ROLES = {"fast", "critique", "reasoning"}
+          ESCALATED_ROLE_ORDER = {"coding": 1, "reasoning": 2, "critical-ops": 3}
           for i, task in enumerate(tasks):
               if not isinstance(task, dict):
                   print(f"ERROR: plan_data.tasks[{i}] is {type(task).__name__}, not a dict", file=sys.stderr)
@@ -132,6 +166,44 @@ stages:
                   tid = task.get("task_id", "UNKNOWN")
                   print(f"ERROR: plan_data.tasks[{i}] (task_id={tid!r}) missing keys: {sorted(missing)}", file=sys.stderr)
                   sys.exit(1)
+              for field in ("goal", "interfaces"):
+                  if not isinstance(task[field], str) or not task[field].strip():
+                      print(
+                          f"ERROR: plan_data.tasks[{i}] {field} must be a non-empty string",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
+              implementation_role = task["implementation_model_role"]
+              review_role = task["review_model_role"]
+              escalated_role = task["escalated_model_role"]
+              if implementation_role not in IMPLEMENTATION_ROLE_ORDER:
+                  print(
+                      f"ERROR: plan_data.tasks[{i}] has invalid implementation_model_role: "
+                      f"{implementation_role!r}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              if review_role not in REVIEW_ROLES:
+                  print(
+                      f"ERROR: plan_data.tasks[{i}] has invalid review_model_role: "
+                      f"{review_role!r}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              if escalated_role not in ESCALATED_ROLE_ORDER:
+                  print(
+                      f"ERROR: plan_data.tasks[{i}] has invalid escalated_model_role: "
+                      f"{escalated_role!r}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              if ESCALATED_ROLE_ORDER[escalated_role] <= IMPLEMENTATION_ROLE_ORDER[implementation_role]:
+                  print(
+                      f"ERROR: plan_data.tasks[{i}] escalation must be above implementation "
+                      f"role: {implementation_role!r} -> {escalated_role!r}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
 
           print(f"plan_data validated: {len(tasks)} task(s) ready for execution")
           PYEOF
@@ -139,18 +211,110 @@ stages:
           PLAN_DATA: "{{plan_data}}"
 
       # -----------------------------------------------------------------------
-      # Step 1.5: Initialize project brief from cache (if exists)
+      # Step 1.5: Initialize plan-scoped state
       # -----------------------------------------------------------------------
-      - id: "init-project-brief"
+      - id: "initialize-plan-state"
         type: "bash"
-        timeout: 10
+        timeout: 30
         command: |
-          if [ -f ".kenergy-project-brief.txt" ]; then
-            cat .kenergy-project-brief.txt
-          else
-            echo ""
-          fi
-        output: "project_brief"
+          set -eu
+          python3 - <<'PYEOF'
+          import json
+          import re
+          from pathlib import Path
+
+          raw = Path("{{plan_path}}").expanduser()
+          plan = raw.resolve()
+          if not plan.is_file():
+              raise SystemExit(f"BLOCKED: plan not found: {plan}")
+
+          slug = re.sub(r"[^a-z0-9]+", "-", plan.stem.lower()).strip("-")
+          if not slug:
+              raise SystemExit("BLOCKED: plan filename produced an empty slug")
+
+          state_dir = Path(".kenergy") / "sdd" / slug
+          briefs = state_dir / "task-briefs"
+          packets = state_dir / "review-packages"
+          briefs.mkdir(parents=True, exist_ok=True)
+          packets.mkdir(parents=True, exist_ok=True)
+
+          ledger = state_dir / "ledger.md"
+          identity = str(plan)
+          first_line = f"# Plan: {identity}"
+          if ledger.exists():
+              actual = ledger.read_text(encoding="utf-8").splitlines()
+              if not actual or actual[0] != first_line:
+                  raise SystemExit(
+                      "BLOCKED: ledger identity mismatch; refusing cross-plan state"
+                  )
+          else:
+              ledger.write_text(
+                  first_line + "\n\n## Completed Tasks\n\n## Parked Findings\n",
+                  encoding="utf-8",
+              )
+
+          print(json.dumps({
+              "plan_identity": identity,
+              "plan_slug": slug,
+              "state_dir": str(state_dir),
+              "ledger_path": str(ledger),
+          }))
+          PYEOF
+        parse_json: true
+        output: "plan_state"
+
+      # -----------------------------------------------------------------------
+      # Step 1.6: Reconcile durable ledger state against Git history
+      # -----------------------------------------------------------------------
+      - id: "reconcile-plan-state"
+        type: "bash"
+        timeout: 30
+        command: |
+          set -eu
+          python3 - <<'PYEOF'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          ledger = Path("{{plan_state.ledger_path}}").expanduser()
+          if not ledger.is_file():
+              raise SystemExit(f"BLOCKED: ledger not found: {ledger}")
+
+          lines = ledger.read_text(encoding="utf-8").splitlines()
+          # Compare only durable ledger entries with git log --oneline. This
+          # step is read-only and never promotes conversation memory to state.
+          log_lines = subprocess.check_output(
+              ["git", "log", "--oneline"], text=True
+          ).splitlines()
+          commit_prefixes = {
+              line.split(maxsplit=1)[0] for line in log_lines if line.strip()
+          }
+          entry_pattern = re.compile(
+              r"^- \[x\] (?P<task>.+?) — (?P<sha>[0-9a-f]+) — (?P<outcome>.+)$"
+          )
+          discrepancies = []
+
+          for line in lines:
+              if not line.startswith("- [x] "):
+                  continue
+              match = entry_pattern.match(line)
+              if not match:
+                  discrepancies.append(f"malformed completed-task entry: {line}")
+                  continue
+              sha = match.group("sha")
+              if not any(sha.startswith(prefix) for prefix in commit_prefixes):
+                  discrepancies.append(
+                      f"{match.group('task')}: ledger commit {sha} is absent "
+                      "from git log --oneline"
+                  )
+
+          if discrepancies:
+              print("RECONCILIATION: discrepancies found; git history is authoritative")
+              for discrepancy in discrepancies:
+                  print(f"- {discrepancy}")
+          else:
+              print("RECONCILIATION: ledger entries match git log --oneline")
+          PYEOF
 
       # -----------------------------------------------------------------------
       # Step 2: Per-Task Pipeline
@@ -164,7 +328,9 @@ stages:
         recipe: "single-task-pipeline.yaml"
         context:
           current_task: "{{current_task}}"
-          project_brief: "{{project_brief}}"
+          plan_identity: "{{plan_state.plan_identity}}"
+          state_dir: "{{plan_state.state_dir}}"
+          ledger_path: "{{plan_state.ledger_path}}"
         collect: "completed_tasks"
 
       # -----------------------------------------------------------------------
