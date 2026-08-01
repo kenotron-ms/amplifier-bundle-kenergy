@@ -34,7 +34,11 @@ Per `docs/primer.md` §3, every graph below was designed in this order, not
 Each `.dot` file's header comment states its sink/gate/loop explicitly so
 this isn't left implicit.
 
-## The six top-level graphs
+## The six top-level graphs, standalone
+
+Each of these runs on its own -- point the attractor bundle at it directly
+via its own `git+https://...#subdirectory=pipelines/<name>/<name>.dot` URL
+without pulling in the rest of the lifecycle.
 
 | Graph | Mode | Sink |
 |---|---|---|
@@ -44,6 +48,47 @@ this isn't left implicit.
 | `debug/debug.dot` | `/debug` | Original reproduction re-run fresh and confirmed gone, independent of the fix agent's claim |
 | `verify/verify.dot` | `/verify` | All four checks backed by real captured command output, held to the bar by the kenergy skill's post-work gate |
 | `finish/finish.dot` | `/finish` | Chosen action (merge/PR/keep/discard) independently confirmed against real Git/GitHub state |
+
+## The seventh graph: the full cycle, composed
+
+`kenergy_full_cycle/kenergy_full_cycle.dot` -- the master orchestrator that
+composes all six mode-graphs above into the complete idea-to-finish arc,
+mirroring `kenergy-reference/SKILL.md`'s own manual-path diagram:
+
+```text
+/think-like-ken -> /plan-like-ken -> /build-like-ken -> /verify (recommended) -> /finish
+```
+
+with `/debug` reachable as shared recovery from both a blocked build and
+unverified evidence, and a human `ResumeRoute` hexagon deciding whether a
+fix resumes the build, the plan, or the design -- matching `debug.md`'s own
+Dynamic Transitions guidance, which leaves that call to a human rather than
+a file-state gate.
+
+Named after `recipes/kenergy-full-development-cycle.yaml` deliberately --
+same lifecycle, DOT rendering instead of recipe YAML.
+
+**Composition mechanics:** the six mode-graphs and their five skill-subgraphs
+are duplicated into `kenergy_full_cycle/subgraphs/` and
+`kenergy_full_cycle/subgraphs/subgraphs/` respectively, preserving each
+graph's *exact original relative folder depth* to its own subgraphs (e.g.
+`build_like_ken.dot`'s `dot_file="subgraphs/kenergy_reality_check.dot"`
+resolves identically whether the file lives at
+`build_like_ken/build_like_ken.dot` or here at
+`kenergy_full_cycle/subgraphs/build_like_ken.dot` -- both have a sibling
+`subgraphs/` folder one level down). One canonical copy of each mode's logic,
+reused two ways: standalone, and composed here. This is the same reuse
+discipline `docs/RUBRIC.md` §5 already requires for `deliver_pr.dot`, applied
+one level deeper.
+
+**The one new foot-gun this composition specifically has to dodge**
+(`docs/RUBRIC.md` §3.7): a `shape=folder` subgraph node silently returns its
+*last internal outcome* to the parent graph even when nothing meaningful
+happened inside it. `CheckBuildVerdict` and `CheckVerifyVerdict` exist
+specifically so this graph never treats "the `BuildLikeKen` node returned"
+as success -- both explicitly read the context field
+(`context.build.verdict`, `context.verify.verdict`) each subgraph is
+contracted to write before routing anywhere.
 
 ## Skill-to-subgraph mapping
 

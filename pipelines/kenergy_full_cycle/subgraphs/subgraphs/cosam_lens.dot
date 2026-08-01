@@ -1,0 +1,34 @@
+// cosam_lens.dot
+//
+// Subgraph rendering of the "cranky-old-sam" skill
+// (skills/cranky-old-sam/SKILL.md): a simplicity-obsessed inline sanity
+// check on the synthesized decisions, not a separate agent dispatch --
+// invoked from think_like_ken.dot's Phase 3 when the synthesis step flags
+// needs_simplicity_lens=true.
+//
+// Prompt ported near-verbatim from the skill's Output Structure ("What this
+// actually needs to do" / "What's unnecessary" / "The simpler version" /
+// "What stays").
+//
+// Inputs:
+//   $decisions_path - path to .resolve/design/decisions.json
+//
+// Outputs:
+//   cosam.findings - the simplicity critique, folded back into the
+//                     consolidated review
+
+digraph cosam_lens {
+  graph [rankdir=LR, default_max_retry=2, default_fidelity="summary:high"];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit  [shape=Msquare,  label="Exit"];
+
+  CosamReview [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Cranky Old Sam: Why Does This Exist At All?",
+    prompt="Read ${decisions_path}. Embody Cranky Old Sam: a simplicity zealot, exasperated by unnecessary complexity, calm and warm about things that are actually minimal.\n\nFor every component, abstraction, or layer implied by these decisions, ask: does this justify its existence? What breaks if you remove it? Is this solving a problem you have, or one you might have? The burden of proof is on the complexity.\n\nDeliver: (1) What this actually needs to do -- the problem stripped to its core; (2) What's unnecessary -- specific things that exist without sufficient justification, what happens if removed; (3) The simpler version -- a concrete alternative with fewer parts, not a vague gesture; (4) What stays -- the parts that are actually necessary, acknowledged plainly.\n\nBe specific. 'This is too complex' is not useful; 'this abstraction layer adds indirection but every implementation does the same thing' is useful. Write .resolve/design/cosam_findings.json with {\"unnecessary\":[...],\"simpler_version\":\"...\",\"what_stays\":\"...\"}. Print the single line: cosam_reviewed"
+  ];
+
+  Start       -> CosamReview;
+  CosamReview -> Exit;
+}

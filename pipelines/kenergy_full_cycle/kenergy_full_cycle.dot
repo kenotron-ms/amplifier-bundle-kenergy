@@ -1,0 +1,176 @@
+// kenergy_full_cycle.dot
+//
+// Top-level orchestrator composing all six kenergy mode-graphs into the full
+// idea-to-finish arc: think_like_ken -> plan_like_ken -> build_like_ken ->
+// (recommended) verify -> finish, with debug reachable as shared recovery
+// from both build_like_ken (blocked) and verify (not_verified).
+//
+// This is the graph the six standalone mode-graphs were always meant to
+// compose into -- mirrors kenergy-reference.md's own "Manual/standalone path"
+// diagram exactly:
+//   /think-like-ken -> /plan-like-ken -> /build-like-ken -> /verify (recommended) -> /finish
+// with /debug reachable at any point a bug needs root-cause investigation.
+//
+// Naming note: this mirrors recipes/kenergy-full-development-cycle.yaml's
+// name deliberately -- same lifecycle, DOT rendering instead of recipe YAML.
+//
+// DESIGN ORDER (docs/primer.md §3):
+//   1. THE SINK: `finish.dot`'s own sink (a confirmed merge/PR/keep/discard
+//      action) -- but only reachable after every upstream stage's own sink
+//      was independently satisfied: think_like_ken's approved+self-reviewed
+//      design, plan_like_ken's contract-confirmed plan, build_like_ken's
+//      all-tasks-accepted-or-explicitly-blocked verdict, and (when run)
+//      verify's proven-not-asserted evidence.
+//   2. THE GATE: per docs/RUBRIC.md §3.7, a `shape=folder` subgraph node
+//      silently returns its LAST internal outcome to the parent graph even
+//      when nothing meaningful happened inside it -- so this graph never
+//      treats "the BuildLikeKen node finished" as success. CheckBuildVerdict
+//      and CheckVerifyVerdict explicitly read the context fields each
+//      subgraph is contracted to write (`context.build.verdict`,
+//      `context.verify.verdict`) before routing anywhere.
+//   3. THE LOOP: Debug is one shared recovery subgraph reachable from both
+//      failure points (RUBRIC.md's differentiated-failure-edges doctrine --
+//      a blocked build and unverified evidence are different failure
+//      classes, but both genuinely need root-cause investigation, so both
+//      route to the same investigation phase rather than each inventing a
+//      bespoke patch path). ResumeRoute is a human hexagon after Debug
+//      because "where do we resume" is a genuine judgment call debug.md's
+//      own Dynamic Transitions section leaves to a human, not something a
+//      deterministic gate can decide from file state alone.
+//   4. THE WORK NODES were written last: the six folder nodes plus the two
+//      verdict gates and the resume-routing hexagon.
+//
+// Subgraph placement: the six mode-graphs and their five skill-subgraphs are
+// duplicated here under subgraphs/ and subgraphs/subgraphs/ respectively,
+// preserving their exact original relative folder depth (e.g.
+// build_like_ken.dot's own `dot_file="subgraphs/kenergy_reality_check.dot"`
+// resolves the same way whether build_like_ken.dot lives at
+// build_like_ken/build_like_ken.dot or here at
+// kenergy_full_cycle/subgraphs/build_like_ken.dot, because both have a
+// sibling subgraphs/ folder one level down). This keeps every standalone
+// mode-graph runnable unmodified both on its own AND composed here -- one
+// canonical copy of each mode's logic, reused two ways, per docs/RUBRIC.md
+// §5's reuse discipline.
+//
+// Context inputs:
+//   $topic           - the idea/feature being designed
+//   $execution_root   - worktree/repo root build_like_ken executes inside
+//
+// Context outputs:
+//   cycle.finish_action - "merge" | "pr" | "keep" | "discard"
+
+digraph kenergy_full_cycle {
+  graph [
+    label="Kenergy Full Cycle -- idea to finish, six modes composed",
+    goal="$topic",
+    rankdir=LR,
+    default_max_retry=2,
+    default_fidelity="summary:high",
+    model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic; }"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit  [shape=Msquare,  label="Exit"];
+
+  ThinkLikeKen [
+    shape=folder, label="/think-like-ken",
+    dot_file="subgraphs/think_like_ken.dot",
+    inputs="topic=$topic",
+    outputs="design.design_doc"
+  ];
+
+  PlanLikeKen [
+    shape=folder, label="/plan-like-ken",
+    dot_file="subgraphs/plan_like_ken.dot",
+    inputs="design_doc=context.design.design_doc",
+    outputs="plan.plan_doc"
+  ];
+
+  BuildLikeKen [
+    shape=folder, label="/build-like-ken",
+    dot_file="subgraphs/build_like_ken.dot",
+    inputs="plan_path=context.plan.plan_doc,execution_root=$execution_root",
+    outputs="build.verdict,build.tasks_completed,build.blocked_task_id"
+  ];
+
+  // THE GATE for build_like_ken's return -- never assume "the folder node
+  // finished" means all tasks landed.
+  CheckBuildVerdict [
+    shape=parallelogram, label="Check build.verdict (not just that the node returned)",
+    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"$BUILD_VERDICT\"",
+    env="BUILD_VERDICT=$context.build.verdict"
+  ];
+
+  Debug [
+    shape=folder, label="/debug (shared recovery)",
+    dot_file="subgraphs/debug.dot",
+    inputs="bug_description=context.build.blocked_task_id",
+    outputs="debug.root_cause,debug.fix_commit_sha"
+  ];
+
+  // Genuine human judgment call -- debug.md's own Dynamic Transitions
+  // section leaves "where do we resume" to the human, not a file-state gate.
+  ResumeRoute [
+    shape=hexagon, mode="multiple_choice", options="continue_build,replan,redesign",
+    label="Resume Where? (after debug)",
+    prompt="Root cause: ${debug.root_cause}. Fix: ${debug.fix_commit_sha}. Where should the cycle resume: continue_build (the blocked task, same plan), replan (the plan itself needs revision), or redesign (the design needs rethinking)?"
+  ];
+
+  // /verify is recommended but not mandatory -- kenergy-reference.md: "An
+  // interactive human may transition directly from /build-like-ken to
+  // /finish, but /verify remains the recommended separate evidence-gathering
+  // step." Default is to run it; explicit human choice can skip.
+  RecommendVerify [
+    shape=hexagon, mode="multiple_choice", options="run_verify,skip_to_finish",
+    label="Run /verify? (recommended, skippable)",
+    prompt="All tasks accepted (${build.tasks_completed} completed). /verify gathers fresh, independently-interpreted completion evidence before /finish -- recommended for anything non-trivial. Run it, or skip straight to /finish?"
+  ];
+
+  Verify [
+    shape=folder, label="/verify",
+    dot_file="subgraphs/verify.dot",
+    outputs="verify.verdict"
+  ];
+
+  // THE GATE for verify's return.
+  CheckVerifyVerdict [
+    shape=parallelogram, label="Check verify.verdict",
+    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"$VERIFY_VERDICT\"",
+    env="VERIFY_VERDICT=$context.verify.verdict"
+  ];
+
+  Finish [
+    shape=folder, label="/finish",
+    dot_file="subgraphs/finish.dot",
+    outputs="finish.action,finish.merge_sha,finish.pr_url"
+  ];
+
+  Report [
+    shape=box, goal_gate=true, fidelity="summary:high",
+    label="Report Full Cycle",
+    prompt="Summarize the complete cycle: design (${design.design_doc}), plan (${plan.plan_doc}), build (${build.tasks_completed} tasks, verdict ${build.verdict}), verify (${verify.verdict}, if run), finish (${finish.action}). Print the single line: cycle_reported"
+  ];
+
+  Start                -> ThinkLikeKen;
+  ThinkLikeKen          -> PlanLikeKen;
+  PlanLikeKen           -> BuildLikeKen;
+  BuildLikeKen          -> CheckBuildVerdict;
+
+  CheckBuildVerdict     -> RecommendVerify [condition="context.build.verdict=all_tasks_complete", weight="2"];
+  CheckBuildVerdict     -> Debug           [condition="context.build.verdict=blocked"];
+
+  Debug                 -> ResumeRoute;
+  ResumeRoute           -> BuildLikeKen    [condition="context.tool.last_line=continue_build", loop_restart="true", weight="2"];
+  ResumeRoute           -> PlanLikeKen     [condition="context.tool.last_line=replan", loop_restart="true"];
+  ResumeRoute           -> ThinkLikeKen    [condition="context.tool.last_line=redesign", loop_restart="true"];
+
+  RecommendVerify       -> Verify          [condition="context.tool.last_line=run_verify", weight="2"];
+  RecommendVerify       -> Finish          [condition="context.tool.last_line=skip_to_finish"];
+
+  Verify                -> CheckVerifyVerdict;
+  CheckVerifyVerdict    -> Finish          [condition="context.verify.verdict=verified", weight="2"];
+  CheckVerifyVerdict    -> Debug           [condition="context.verify.verdict=not_verified"];
+
+  Finish                -> Report;
+  Report                 -> Exit;
+}
