@@ -22,7 +22,7 @@ This is not negotiable. This is not optional. You cannot rationalize your way ou
 
 **Modes:** Use the `mode` tool or `/mode` commands (e.g., `/think-like-ken`, `/debug`, `/build-like-ken`) to enter the appropriate workflow phase.
 
-**Delegation:** Use `delegate()` to dispatch work to specialized agents when the workflow requires it (e.g., implementer, spec-reviewer, code-quality-reviewer).
+**Delegation:** Use `delegate()` to dispatch work to specialized agents when the workflow requires it (e.g., implementer, spec-reviewer, reviewer).
 
 ## The Rule
 
@@ -49,7 +49,7 @@ When multiple skills could apply, use this order:
 
 ## Skill Types
 
-**Rigid** (TDD, debugging): Follow exactly. Don't adapt away discipline.
+**Rigid** (VDD, debugging): Follow exactly. Don't adapt away discipline.
 **Flexible** (patterns): Adapt principles to context.
 
 The skill itself tells you which.

@@ -6,12 +6,12 @@ Violating the letter of a process rule IS violating the spirit.
 
 Common rationalizations to reject:
 
-- "I'll just quickly add this one thing first, then write the test" — No. Write the test first.
+- "I'll just quickly add this one thing, then decide how to verify it" — No. State the claim and choose a falsifiable method first.
 - "The spec didn't explicitly say I can't do this" — If it wasn't specified, don't add it.
-- "I already know it works, the test is just a formality" — Then write the test and prove it.
+- "I already know it works, the check is just a formality" — Then run the check and record the observed output.
 - "This is just a minor cleanup, it doesn't count as a feature" — Scope creep starts with minor things.
-- "I'll refactor while I'm in here" — Refactor is its own step; don't mix it with GREEN.
-- "The test would be too hard to write for this" — That's a design smell; address the design.
+- "I'll refactor while I'm in here" — Refactor is its own scoped change; state its claim and verification method.
+- "The real-path check would be too hard to run for this" — That is a design or environment signal; identify a falsifiable production-relevant method.
 
 ## YAGNI — Ruthless Scope Control
 
@@ -28,9 +28,10 @@ Done means verified, not "I think it works."
 
 Before claiming any task is complete:
 
-1. Run the full test suite and confirm all tests pass — not just the new ones.
-2. Verify the specific behavior described in the spec — not just that tests are green.
-3. Check for regressions — confirm nothing that was passing before is now failing.
+1. State the specific behavior claim from the task.
+2. Choose and run the cheapest falsifiable check at the appropriate VDD level.
+3. Record the exact command, observed output, and exit status.
+4. Confirm the evidence proves the claim and reveals no applicable regression.
 
 ## The Three-Fix Escalation
 

@@ -1,24 +1,26 @@
-# Superpowers Philosophy
+# Kenergy Philosophy
 
 ## Core Principles
 
-### 1. Test-Driven Development is Non-Negotiable
+### 1. Verification-Driven Development is Non-Negotiable
 
-Write the test first. Watch it fail. Write minimal code to pass.
-
-If you didn't watch the test fail, you don't know if it tests the right thing. Code written before tests must be deleted - no exceptions, no "keeping as reference."
+Define the claim, choose the cheapest real check that could falsify it, run that
+check, read the actual output, and only then claim completion.
 
 The cycle:
 
+```text
+CLAIM: State the behavior that must be true
+  -> METHOD: Choose a check that would fail if the behavior broke
+  -> EXECUTE: Run the real path at the appropriate VDD level
+  -> EVIDENCE: Record the exact command and observed output
+  -> REVIEW: Confirm the evidence proves the original claim
 ```
-RED: Write failing test
-  → Verify it fails for the right reason
-GREEN: Write minimal code to pass
-  → Verify all tests pass
-REFACTOR: Clean up
-  → Stay green
-REPEAT
-```
+
+Static analysis is the floor. Unit tests are appropriate for library behavior.
+Use direct execution, live HTTP, browser observation, or an isolated reality
+check when those are the real production path. Mocks-only evidence does not prove
+non-library product behavior.
 
 ### 2. Systematic Over Ad-Hoc
 
@@ -31,13 +33,15 @@ Always find the root cause before attempting fixes. Follow the four-phase debugg
 "It should work" is not verification. "I tested it manually" is not proof.
 
 **The Gate Function — apply before ANY completion claim:**
-1. IDENTIFY: What command proves this claim?
-2. RUN: Execute the FULL command (fresh, in this session)
-3. READ: Full output, check exit code, count failures
-4. VERIFY: Does output confirm the claim?
-5. ONLY THEN: Make the claim
+1. CLAIM: What behavior must be true?
+2. METHOD: Which falsifiable check exercises that behavior at the correct VDD level?
+3. EXECUTE: Run the real path fresh in this session.
+4. EVIDENCE: Record the exact command, output, and exit status.
+5. REVIEW: Does the observed evidence prove the original claim?
 
-Every fix must be demonstrated with evidence: tests passing, manual verification documented, side effects checked.
+Every fix must be demonstrated with falsifiable evidence. Unit tests are
+appropriate for library behavior; non-library product behavior requires the
+relevant real path.
 
 ### 4. Complexity Reduction as Primary Goal
 
@@ -49,60 +53,61 @@ YAGNI (You Aren't Gonna Need It) ruthlessly. DRY (Don't Repeat Yourself) pragmat
 
 Never jump into code. First understand what you're building through collaborative design. Then create a detailed plan with bite-sized tasks. Then execute systematically.
 
-The plan should be clear enough for "an enthusiastic junior engineer with poor taste, no judgment, no project context, and an aversion to testing" to follow.
+The plan should be clear enough for "an enthusiastic junior engineer with poor taste, no judgment, no project context, and an aversion to verification" to follow.
 
 ### 6. Isolation for Safety
 
-Use git worktrees to isolate feature work. Never work directly on main. Verify clean test baseline before starting. Clean up when done.
+Use git worktrees to isolate feature work. Never work directly on main. Verify a clean applicable baseline before starting. Clean up when done.
 
-### 7. Human Checkpoints at Critical Points
+### 7. Human Checkpoints Only at Genuine Forks
 
-Autonomous work is powerful, but human judgment is essential at key moments:
-- After design completion (before saving)
-- After plan creation (before execution)
-- Between execution batches
-- Before merging/PR creation
+The normal development path has two checkpoints:
+1. Design approval, once.
+2. The pre-merge, PR, keep, or discard decision in `/finish`, once.
 
-## The Superpowers Workflow
+Planning mechanics and execution progress are engineering work, not human
+checkpoints. A pre-flight conflict is surfaced only when an actual contradiction
+requires a human decision.
 
-```
-1. BRAINSTORM -> Refine idea into design (human approves)
-2. PLAN -> Break design into tasks (human approves)
-3. WORKTREE -> Create isolated workspace
-4. EXECUTE -> Implement with TDD + reviews
-5. FINISH -> Verify, merge/PR, cleanup
+## The Kenergy Workflow
+
+```text
+DESIGN (approve once) -> PLAN (automatic) -> WORKTREE -> EXECUTE (continuous) -> FINISH (choose once)
 ```
 
-Each step uses the appropriate recipe with built-in quality gates.
+Each phase uses the appropriate workflow mechanisms with built-in quality gates.
 
-## The Two-Stage Review Pattern
+## The Three-Axis Reviewer
 
-After each task implementation, two separate review passes ensure quality:
+After each task implementation or fix, one `kenergy:reviewer` performs a
+three-axis review:
 
-**Stage 1: Spec Compliance Review** (kenergy:verifier)
-- Does implementation match the spec exactly?
-- Nothing missing from requirements?
-- Nothing extra that wasn't requested?
+**Spec/Goal Compliance**
+- Does implementation match the requested behavior and interfaces?
+- Is anything required missing, or anything unrequested added?
 
-**Stage 2: Code Quality Review** (kenergy:quality-reviewer)
-- Clean code principles followed?
-- Proper error handling?
-- Test coverage adequate?
-- No obvious issues?
+**Quality**
+- Is the implementation correct, clear, safe where relevant, and minimal?
+- Are error handling and maintainability appropriate to the task?
 
-Both stages must pass before moving to next task. Order matters - spec compliance first, quality second.
+**Verification Adequacy**
+- Can the claimed check name a production break that would make it fail?
+- Does the evidence exercise the real behavior at the appropriate VDD level?
+- Are the exact command and observed output recorded?
+
+All three axes must pass before a task is complete.
 
 ## Anti-Patterns to Avoid
 
 - **Jumping to code** without understanding requirements
-- **Skipping tests** for "simple" changes
+- **Skipping verification** for "simple" changes
 - **Multiple fixes at once** instead of isolated changes
-- **Ignoring test failures** or marking them as "expected"
+- **Ignoring failed verification** or marking it as "expected"
 - **Working on main** instead of feature branches
 - **Claiming success** without verification evidence
-- **Rationalizing shortcuts** ("just this once", "too simple to test")
-- **Test passes on first run** — you didn't verify it tests the right thing
-- **Keeping code as "reference"** while writing tests after the fact
+- **Rationalizing shortcuts** ("just this once", "too simple to verify")
+- **Accepting a check that cannot name the break** — it may not prove behavior
+- **Keeping code as "reference"** instead of recording evidence for its behavior
 - **"This is different because..."** — it's not different
 - **"It's about the spirit, not the letter"** — the letter IS the spirit
 
@@ -112,20 +117,20 @@ When you catch yourself thinking any of these, STOP:
 
 | Thought | Action |
 |---------|--------|
-| "This is too simple to need a test" | Write the test anyway. Simple code breaks. Test takes 30 seconds. |
-| "I'll add tests later" | Write them now or delete the code. Tests passing immediately prove nothing. |
+| "This is too simple to need verification" | State the claim and choose the cheapest falsifiable method. Simple changes still break. |
+| "I'll decide the verification method later" | Choose the method before completion work begins; it determines what evidence is required. |
 | "Quick fix, then investigate" | Investigate first |
-| "It should work now" | Verify with evidence |
+| "It should work now" | Run the real production-relevant path and read its output. |
 | "Just one more try" (after 2 failures) | Question the architecture |
 | "I know what the problem is" | Prove it with evidence |
-| "I already manually tested it" | Ad-hoc ≠ systematic. No record, can't re-run. |
+| "I already manually tested it" | Name the claim and method, then document the exact command and observed output. |
 | "Deleting working code is wasteful" | Sunk cost fallacy. Keeping unverified code is debt. |
-| "Need to explore first" | Fine. Throw away exploration, then start with TDD. |
-| "TDD will slow me down" | TDD is faster than debugging. |
-| "Tests after achieve the same thing" | Tests-first = "what should this do?" Tests-after = "what does this do?" |
-| "I'll keep it as reference" | You'll adapt it. That's testing after. Delete means delete. |
-| "Test is hard to write" | Hard to test = hard to use. Listen to the test. |
-| "TDD is dogmatic, I'm being pragmatic" | TDD IS pragmatic. Shortcuts = debugging in production = slower. |
+| "Need to explore first" | Fine. Treat exploration as disposable, then state the claim and select a falsifiable method. |
+| "VDD will slow me down" | The cheapest real check costs less than debugging a false completion later. |
+| "A green unit test proves product behavior" | Unit tests prove library behavior; use the relevant real path for non-library product behavior. |
+| "I'll keep it as reference" | Reference code is not evidence. Record the result of a falsifiable check. |
+| "The real path is hard to run" | That exposes a design or environment gap; find the closest falsifiable production-relevant method. |
+| "VDD is dogmatic, I'm being pragmatic" | VDD is pragmatic: unverified success becomes debugging in production. |
 | "This is different because..." | It's not different. The process exists because every project thinks it's different. |
 
 ## The Goal
