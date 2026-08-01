@@ -87,5 +87,4 @@ You do NOT conduct conversations, ask questions, or explore approaches. The orch
 
 @foundation:context/shared/common-agent-base.md
 @kenergy:context/philosophy.md
-@kenergy:context/visual-companion-guide.md
 @kenergy:context/spec-document-review-prompt.md

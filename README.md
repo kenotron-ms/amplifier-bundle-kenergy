@@ -21,13 +21,13 @@ questions directly. Present one consolidated TL;DR review for explicit approval,
 then delegate document creation to `kenergy:design-writer` — the orchestrator
 converses, the agent writes the artifact.
 
-**`/plan-like-ken`** — Plan before implementation.
+**`/plan-like-ken`** — Direct planning from the approved design.
 
-Review the design doc, map dependencies, decide the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation to `kenergy:plan-writer`.
+Reads the approved design, maps dependencies, and decides the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation directly to `kenergy:plan-writer`.
 
 **`/build-like-ken`** — Continuous execution with real verification.
 
-For each task: implementer → merged three-axis `kenergy:reviewer` → bounded resume/escalate/adjudicate remediation loop. The orchestrator never writes code. Real execution output is required. Mocks-only = not verified.
+For each task: `kenergy:implementer` → merged `kenergy:reviewer` → bounded resume/escalate/adjudicate remediation loop, continuing through the plan without an approval gate between tasks. The orchestrator never writes code. Real execution output is required. Mocks-only = not verified.
 
 ```
 /think-like-ken  →  Design saved to docs/plans/
@@ -63,12 +63,11 @@ Five short context files that enforce the shared discipline:
 | `shared-anti-rationalization.md` | YAGNI enforcement, false completion prevention, three-fix escalation rule |
 | `verification-failure-memories.md` | Five cautionary vignettes of false completion patterns |
 
-Four heavier reference files live in `context/` but are **not** always loaded (to preserve token budget):
+Three heavier reference files live in `context/` but are **not** always loaded (to preserve token budget):
 
 - `spec-document-review-prompt.md` — antagonistic spec reviewer dispatch template (referenced by `/think-like-ken`)
 - `debugging-techniques.md` — root-cause tracing reference
 - `tdd-depth.md` — TDD iron law, anti-patterns, and extended rebuttals
-- `visual-companion-guide.md` — visual brainstorming companion guide
 
 To always load any of these, add them to your `~/.amplifier/context/`.
 
