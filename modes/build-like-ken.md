@@ -46,7 +46,7 @@ tests, or commits must use that exact worktree, never its parent checkout.
 
 ## Execution Paths
 
-### Automated recipe path: non-interactive full cycle
+### Automated recipe path: full cycle (continuous between checkpoints)
 
 `kenergy-full-development-cycle.yaml` is the automated completion path:
 

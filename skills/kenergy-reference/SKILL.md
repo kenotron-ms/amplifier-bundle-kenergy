@@ -25,7 +25,7 @@ An interactive human may transition directly from `/build-like-ken` to
 `/finish`, but `/verify` remains the recommended separate evidence-gathering
 step before the finish decision.
 
-### Automated/recipe path (non-interactive)
+### Automated/recipe path (continuous between checkpoints)
 
 ```text
 kenergy-full-development-cycle.yaml
