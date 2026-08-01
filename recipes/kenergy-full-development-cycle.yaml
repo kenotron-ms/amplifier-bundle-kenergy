@@ -250,7 +250,6 @@ stages:
           5. Run static analysis in worktree to establish clean baseline
           
           Report the full worktree path and branch name.
-        output: "worktree_info"
 
       # Copy the approved plan into the worktree and resolve one execution target
       - id: "prepare-execution-target"
@@ -355,7 +354,6 @@ stages:
           Use the code-reviewer's output contract and do not modify files,
           commit, push, merge, open a PR, or deploy.
         output: "branch_review"
-        on_error: "continue"
 
       # Present implementation for approval
       - id: "present-implementation"

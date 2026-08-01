@@ -3,7 +3,7 @@
 # to run one uniform implement -> packet review -> bounded fix -> ledger lifecycle.
 #
 # Context variables received from parent:
-#   current_task: The task object with task_id, description, spec, roles, and interfaces.
+#   current_task: The task object with task_id, goal, description, spec, roles, and interfaces.
 #   worktree_path: Absolute Git worktree root for every filesystem and Git operation.
 #   plan_identity: Absolute path of the active implementation plan.
 #   state_dir: Plan-scoped durable state directory.
@@ -18,6 +18,7 @@ tags: ["implementation", "per-task", "pipeline", "vdd", "packet-review", "bounde
 context:
   current_task:
     task_id: ""
+    goal: ""
     description: ""
     spec: ""
     acceptance_criteria: ""
@@ -135,6 +136,9 @@ steps:
       brief = """# Task Brief: {task_id}
 
       ## Goal
+      {goal}
+
+      ## Description
       {description}
 
       ## Specification
@@ -150,6 +154,7 @@ steps:
       {files}
       """.format(
           task_id=task_id,
+          goal=os.environ["TASK_GOAL"],
           description=os.environ["TASK_DESCRIPTION"],
           specification=os.environ["TASK_SPEC"],
           acceptance=os.environ["TASK_ACCEPTANCE"],
@@ -171,6 +176,7 @@ steps:
       PYEOF
     env:
       TASK_ID: "{{current_task.task_id}}"
+      TASK_GOAL: "{{current_task.goal}}"
       TASK_DESCRIPTION: "{{current_task.description}}"
       TASK_SPEC: "{{current_task.spec}}"
       TASK_ACCEPTANCE: "{{current_task.acceptance_criteria}}"
@@ -207,6 +213,7 @@ steps:
       TASK GOAL
       =========
       Task ID: {{current_task.task_id}}
+      Goal: {{current_task.goal}}
       Description: {{current_task.description}}
       Specification: {{current_task.spec}}
       Acceptance Criteria: {{current_task.acceptance_criteria}}
@@ -411,6 +418,7 @@ steps:
           TASK GOAL
           =========
           Task ID: {{current_task.task_id}}
+          Goal: {{current_task.goal}}
           Description: {{current_task.description}}
           Specification: {{current_task.spec}}
           Acceptance Criteria: {{current_task.acceptance_criteria}}
@@ -570,11 +578,16 @@ steps:
         agent: "kenergy:plan-writer"
         model_role: "fast"
         prompt: |
+          TASK GOAL
+          =========
+          Task ID: {{current_task.task_id}}
+          Goal: {{current_task.goal}}
+
           Call delegate exactly once to resume the original implementer:
 
           delegate(
             session_id="{{original_implementer_session_id}}",
-            instruction="Work only inside {{worktree_path}}. Fix only the load-bearing findings in this review, using this precomputed packet instead of re-running Git discovery: {{review_verdict}}\n\nREVIEW PACKAGE:\n{{review_package}}\n\nRerun the task's exact verification, commit in that worktree, and return the full STATUS/SESSION_ID report.",
+            instruction="Work only inside {{worktree_path}}.\n\nTASK ID: {{current_task.task_id}}\nTASK GOAL: {{current_task.goal}}\n\nFix only the load-bearing findings in this review, using this precomputed packet instead of re-running Git discovery: {{review_verdict}}\n\nREVIEW PACKAGE:\n{{review_package}}\n\nRerun the task's exact verification, commit in that worktree, and return the full STATUS/SESSION_ID report.",
             model_role="{{current_task.implementation_model_role}}"
           )
 
@@ -607,6 +620,7 @@ steps:
           TASK GOAL
           =========
           Task ID: {{current_task.task_id}}
+          Goal: {{current_task.goal}}
           Description: {{current_task.description}}
           Specification: {{current_task.spec}}
           Acceptance Criteria: {{current_task.acceptance_criteria}}
