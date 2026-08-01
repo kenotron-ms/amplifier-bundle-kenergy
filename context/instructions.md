@@ -50,7 +50,7 @@ This is not optional. This is not a suggestion.
 | Bug, error, unexpected behavior | `/debug` | Root cause before fixes |
 | "Is it done?", "Does it work?" | `/verify` | Evidence before claims |
 | Tests pass, ready to merge/PR | `/finish` | Clean completion |
-| Full feature, start to finish | `full-development-cycle` recipe | Autopilot with approval gates |
+| Full feature, start to finish | `kenergy-full-development-cycle` recipe | Autopilot with design and finish decision gates |
 </STANDING-ORDER>
 
 ---
@@ -61,13 +61,13 @@ Superpowers offers two ways to work. Suggest the right one based on scope.
 
 ### AUTOPILOT: Full Development Cycle Recipe
 
-For complete features, suggest the `superpowers-full-development-cycle` recipe. The recipe drives the entire pipeline with approval gates at each stage. The user controls pace via approvals.
+For complete features, suggest the `kenergy-full-development-cycle` recipe. The recipe drives the entire pipeline with decision gates at design and finish, not approval at every stage. Planning and execution proceed automatically between those two checkpoints.
 
 ```
-recipes tool -> superpowers:recipes/superpowers-full-development-cycle.yaml
+recipes tool -> kenergy:recipes/kenergy-full-development-cycle.yaml
 ```
 
-This is the recommended path for any multi-phase work. Idea to merged code, hands-off.
+This is the recommended path for any multi-phase work. It carries the work from idea through finish, with human decisions only at design approval and finish.
 
 ### MANUAL: Individual Modes
 
@@ -75,11 +75,11 @@ For partial workflows, ad-hoc tasks, bug fixes, or one-off verification. You sug
 
 | Situation | Suggest |
 |-----------|---------|
-| "Build me a feature from scratch" | Recipe: `superpowers:recipes/superpowers-full-development-cycle.yaml` |
+| "Build me a feature from scratch" | Recipe: `kenergy:recipes/kenergy-full-development-cycle.yaml` |
 | "I have a design, need a plan" | Mode: `/plan-like-ken` |
 | "Fix this bug" | Mode: `/debug` |
 | "Is this ready to ship?" | Mode: `/verify` then `/finish` |
-| "Execute this plan" | Mode: `/build-like-ken` or Recipe: `superpowers:recipes/subagent-driven-development.yaml` |
+| "Execute this plan" | Mode: `/build-like-ken` or Recipe: `kenergy:recipes/subagent-driven-development.yaml` |
 
 ---
 
@@ -99,10 +99,9 @@ Not every task needs the full pipeline. Match the approach to the task. This pre
 Don't suggest `/think-like-ken` for a typo fix. Don't skip `/debug` for a real bug. Use judgment on scale, but when in doubt, suggest the mode.
 
 **Bite-sized task granularity** — Each task in a plan should be 2-5 minutes:
-- "Write the failing test" — one step
-- "Run it to make sure it fails" — one step
-- "Implement the minimal code" — one step
-- "Run tests and verify pass" — one step
+- "Implement the task" — one step
+- "Run the attached real verification" — one step
+- "Record the exact command and observed output" — one step
 - "Commit" — one step
 
 ---
@@ -112,7 +111,7 @@ Don't suggest `/think-like-ken` for a typo fix. Don't skip `/debug` for a real b
 For complete reference tables (modes, agents, recipes, anti-patterns, key rules), use:
 
 ```
-load_skill(skill_name="superpowers-reference")
+load_skill(skill_name="kenergy-reference")
 ```
 
 All other methodology skills (debugging, verification, code review, etc.) are provided by obra/superpowers and discovered automatically via the skill tool.
