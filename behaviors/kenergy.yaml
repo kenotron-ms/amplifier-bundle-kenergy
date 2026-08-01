@@ -8,6 +8,7 @@ agents:
     - kenergy:plan-writer
     - kenergy:implementer
     - kenergy:verifier
+    - kenergy:reviewer
     - kenergy:code-reviewer
     - kenergy:design-writer
     - kenergy:quality-reviewer
