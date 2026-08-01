@@ -47,6 +47,7 @@ Before writing the plan, explore the codebase to ensure accuracy:
 3. **Check the verification toolchain** — what static analysis tools does this project use? (ruff, ty, tsc, oxlint?)
 4. **Verify file paths** — confirm directories exist and paths in the plan will be correct
 5. **Note imports and dependencies** — understand what's already available so plan code is accurate
+6. **Extract contract requirements** — capture the spec's project-wide requirements verbatim for `## Global Constraints` and define exact per-task `Consumes`/`Produces` interfaces. Omitting either block is an error; do not write the plan until both are ready.
 
 This exploration ensures the plan contains verified, accurate paths and real code patterns — not guesses.
 
@@ -62,6 +63,13 @@ This exploration ensures the plan contains verified, accurate paths and real cod
 **Tech Stack:** [Key technologies]
 **Verification approach:** [How this feature will be proven to work end-to-end]
 
+## Global Constraints
+
+[The spec's project-wide requirements — version floors, dependency limits,
+naming and copy rules, platform requirements — one line each, with exact
+values copied verbatim from the spec. Every task's requirements implicitly
+include this section.]
+
 ---
 ```
 
@@ -75,6 +83,12 @@ Each task is ONE logical unit of work. 2-5 minutes of focused implementation:
 **Files:**
 - Create: `exact/path/to/file.py`
 - Modify: `exact/path/to/existing.py:123-145`
+
+**Interfaces:**
+- Consumes: [what this task uses from earlier tasks — exact signatures]
+- Produces: [what later tasks rely on — exact function names, parameter
+  and return types. A task's implementer sees only their own task; this
+  block is how they learn the names and types neighboring tasks use.]
 
 **Implementation**
 [complete copy-pasteable code]
@@ -122,6 +136,10 @@ Unit tests are correct for **library code**. For everything else, run the real t
 
 **Exact file paths.** Always. No "somewhere in src/".
 
+**Global Constraints.** Include one `## Global Constraints` block after Tech Stack and Verification approach. Copy project-wide requirements verbatim; omitting the block or changing exact values is an error.
+
+**Interfaces.** Include one `**Interfaces:**` block after every task's Files block, with exact `Consumes` and `Produces` contracts; omitting a block or leaving a boundary vague is an error.
+
 **Complete code.** Not "add validation" — show the actual code.
 
 **Exact verification command with expected output.** Not "test it" — the actual command and what success looks like.
@@ -142,6 +160,8 @@ Save plans to: `docs/plans/YYYY-MM-DD-<feature-name>.md`
 - Steps that combine multiple actions
 - Vague instructions ("add appropriate error handling")
 - Missing file paths or verification steps
+- Missing `## Global Constraints` block or spec values not copied verbatim
+- Missing `**Interfaces:**` block after any task's Files block, or vague `Consumes`/`Produces` boundaries
 - Defaulting to unit tests for non-library code without justification
 - "Test it manually" — not a verification step
 - Adding content not discussed in the validated plan
