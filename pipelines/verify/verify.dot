@@ -1,0 +1,150 @@
+// verify.dot
+//
+// Top-level attractor pipeline for /verify: evidence-based completion
+// verification. No completion claim without fresh, real evidence gathered
+// IN this run.
+//
+// Source of truth: modes/verify.md (the Iron Law, the Gate Function, the
+// Three Checks + repo-specific Check 4), skills/kenergy/SKILL.md (post-work
+// "proven or asserted?" reused as the final holistic gate),
+// skills/scenario-verification/SKILL.md (reused for UI-facing checks).
+//
+// DESIGN ORDER (docs/primer.md §3):
+//   1. THE SINK: a verification report exists where every one of the Three
+//      Checks (+ repo-specific Check 4, when AGENTS.md/PR template exist)
+//      is backed by an actual command and its actual output captured THIS
+//      run -- and the kenergy skill's post-work gate independently calls it
+//      "proven", not "asserted."
+//   2. THE GATE: HoldOverallClaimToBar (the kenergy_reality_check subgraph in
+//      post_work mode) is the final arbiter -- it does not accept "tests
+//      pass" alone for non-library claims, matching skills/kenergy/SKILL.md
+//      Core Behavior 3 verbatim.
+//   3. THE LOOP: this pipeline has real LLM judgment (interpreting command
+//      output, deciding proven vs asserted), so per RUBRIC.md §1 it needs a
+//      corrective cycle: GatherMoreEvidence re-runs only the SPECIFIC check
+//      HoldOverallClaimToBar named as asserted, bounded to 2 rounds -- after
+//      that it reports NOT VERIFIED and hands off to /debug rather than
+//      looping indefinitely (mirrors debug.dot's own 3-attempt bound in
+//      spirit: a capped retry, not a fuse that silently gives up).
+//   4. THE WORK NODES were written last: RepoConventionsDiscovery, the four
+//      Check-gathering nodes, ScenarioVerification (reused subgraph),
+//      HoldOverallClaimToBar (reused subgraph), Report.
+//
+// Context inputs: (none required -- operates on the current working tree)
+//
+// Context outputs:
+//   verify.verdict - "verified" | "not_verified"
+
+digraph verify {
+  graph [
+    label="Verify -- evidence before claims, no shortcuts",
+    goal="verification report with fresh, real evidence",
+    rankdir=LR,
+    default_max_retry=2,
+    default_fidelity="summary:high",
+    model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic; }"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit  [shape=Msquare,  label="Exit"];
+
+  // Mandatory on mode entry, per verify.md: walk up for AGENTS.md and
+  // .github/PULL_REQUEST_TEMPLATE.md; repo conventions win over defaults.
+  RepoConventionsDiscovery [
+    shape=box, goal_gate=true, fidelity="summary:high",
+    label="Repository Conventions Discovery",
+    prompt="Walk up from the current working directory looking for AGENTS.md, and check for .github/PULL_REQUEST_TEMPLATE.md. If either exists, read it -- its gates are ADDITIVE requirements on top of the Three Checks, and when repo conventions conflict with defaults, the repo wins. If neither exists, note that Check 4 (repo-specific gates) is not applicable this run. Write .resolve/verify/conventions.json with {\"agents_md_gates\":[...],\"pr_template_items\":[...]}. Print the single line: conventions_discovered"
+  ];
+
+  // Check 1: Implementation Verified.
+  GatherImplementationEvidence [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Check 1: Implementation Verified",
+    prompt="Run the appropriate verification for what was built, at the right level: test suite for library code, curl/HTTP for API endpoints, direct execution for scripts/CLIs, config-load + smoke path for config changes. If it's a UI change, this check defers to the ScenarioVerification subgraph. Capture the actual command and its actual output -- 'should pass' or 'looks correct' is not evidence. Write .resolve/verify/check1.json with {\"command\":\"...\",\"output\":\"...\",\"passed\":true|false,\"is_ui_change\":true|false}. Print the single line: check1_done"
+  ];
+
+  UIRoute [
+    shape=parallelogram, label="Is This a UI Change?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('ui' if json.load(open('.resolve/verify/check1.json'))['is_ui_change'] else 'not_ui')\""
+  ];
+
+  ScenarioVerification [
+    shape=folder, label="Scenario Verification (UI changes)",
+    dot_file="subgraphs/scenario_verification.dot",
+    outputs="scenario.result,scenario.report_path"
+  ];
+
+  // Check 2: Behavior Verified -- reproduce the specific claim, not a
+  // general smoke test.
+  GatherBehaviorEvidence [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Check 2: Behavior Verified",
+    prompt="For new features: demonstrate the feature works with a concrete example and capture the output. For bug fixes: reproduce the ORIGINAL bug scenario and show it's fixed. For refactors: show behavior is unchanged. Write .resolve/verify/check2.json with {\"scenario\":\"...\",\"evidence\":\"...\",\"passed\":true|false}. Print the single line: check2_done"
+  ];
+
+  // Check 3: Edge Cases and Regressions.
+  GatherEdgeCaseEvidence [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Check 3: Edge Cases and Regressions",
+    prompt="Run the linter/type checker. Check for obvious regressions in related functionality. Verify error handling with bad/missing input. Write .resolve/verify/check3.json with {\"linter\":\"...\",\"type_checker\":\"...\",\"edge_case_tested\":\"...\",\"passed\":true|false}. Print the single line: check3_done"
+  ];
+
+  // Check 4: Repo-Specific Gates -- only meaningful when conventions exist.
+  GatherRepoGateEvidence [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Check 4: Repo-Specific Gates",
+    prompt="Using .resolve/verify/conventions.json, confirm every AGENTS.md gate and every PR-template checklist item is addressed by evidence already gathered above -- not waved off. Write .resolve/verify/check4.json with {\"gates_satisfied\":true|false,\"unaddressed\":[...]}. Print the single line: check4_done"
+  ];
+
+  // THE GATE. Reuses the kenergy skill's post-work mode as the final,
+  // holistic arbiter across all four checks -- never accepts a passing test
+  // suite alone as proof for a non-library, user-facing claim.
+  HoldOverallClaimToBar [
+    shape=folder, label="Kenergy Reality Check (post-work: proven or asserted?)",
+    dot_file="subgraphs/kenergy_reality_check.dot",
+    inputs="mode=post_work,claimed_evidence=all_four_checks",
+    outputs="verdict.proven_or_asserted,verdict.gap"
+  ];
+
+  OverallGate [
+    shape=parallelogram, label="Proven or Asserted?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('.resolve/verify/reality_check.json'))['verdict'])\""
+  ];
+
+  GatherMoreEvidence [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Gather More Evidence for the Named Gap (bounded)",
+    prompt="HoldOverallClaimToBar named this exact gap: $(python3 -c \"import json;print(json.load(open('.resolve/verify/reality_check.json'))['gap'])\"). Re-run ONLY the check that produced this gap -- do not redo checks that already produced real evidence. Update the corresponding check file with the new command and output. Print the single line: more_evidence_gathered"
+  ];
+
+  CheckRetryCount [
+    shape=parallelogram, label="Retry Bound (2 rounds)",
+    tool_command="#!/bin/sh\nset -e\ncount=$(python3 scripts/bump_retry.py --state-file .resolve/verify/retry_count.json)\nif [ \"$count\" -le 2 ]; then printf 'retry'; else printf 'exhausted'; fi"
+  ];
+
+  Report [
+    shape=box, goal_gate=true, fidelity="summary:high",
+    label="Verification Report",
+    prompt="Present the Verification Report: Implementation (command, result, expected, status), Behavior (scenario, result), Edge Cases (linter/type-checker/edge-case results), Repo Gates (if applicable). Verdict: VERIFIED or NOT VERIFIED. If NOT VERIFIED, name exactly what remains. Print the single line: reported"
+  ];
+
+  Start                        -> RepoConventionsDiscovery;
+  RepoConventionsDiscovery     -> GatherImplementationEvidence;
+  GatherImplementationEvidence -> UIRoute;
+  UIRoute                      -> ScenarioVerification [condition="context.tool.last_line=ui"];
+  UIRoute                      -> GatherBehaviorEvidence [condition="context.tool.last_line=not_ui", weight="2"];
+  ScenarioVerification          -> GatherBehaviorEvidence;
+
+  GatherBehaviorEvidence        -> GatherEdgeCaseEvidence;
+  GatherEdgeCaseEvidence         -> GatherRepoGateEvidence;
+  GatherRepoGateEvidence          -> HoldOverallClaimToBar;
+  HoldOverallClaimToBar           -> OverallGate;
+
+  OverallGate                     -> Report               [condition="context.tool.last_line=proven", weight="2"];
+  OverallGate                     -> CheckRetryCount        [condition="context.tool.last_line=asserted"];
+  CheckRetryCount                  -> GatherMoreEvidence     [condition="context.tool.last_line=retry"];
+  CheckRetryCount                  -> Report                 [condition="context.tool.last_line=exhausted", label="report NOT VERIFIED, hand off to /debug"];
+  GatherMoreEvidence                -> HoldOverallClaimToBar  [loop_restart="true"];
+
+  Report                            -> Exit;
+}

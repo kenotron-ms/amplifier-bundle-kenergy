@@ -1,0 +1,132 @@
+// debug.dot
+//
+// Top-level attractor pipeline for /debug: systematic four-phase debugging.
+// Root cause before fixes, evidence before claims, no shotgun patches.
+//
+// Source of truth: modes/debug.md (verbatim phase names, the Iron Law, the
+// 3-attempts escalation rule).
+//
+// DESIGN ORDER (docs/primer.md §3):
+//   1. THE SINK: the ORIGINAL reproduction scenario, re-run fresh after the
+//      fix, no longer reproduces the bug -- verified independently of the
+//      fix agent's own claim, per the mode's explicit "After the agent
+//      returns: Verify the fix yourself... If the fix didn't work, return to
+//      Phase 1 with the new information."
+//   2. THE GATE: VerifyFixIndependently re-runs the ORIGINAL reproduction
+//      steps captured in Phase 1 (not a new scenario the fix agent picked)
+//      and reads real output -- never trusts "STATUS: DONE" from the fix
+//      delegation as proof the bug is gone.
+//   3. THE LOOP: TestHypothesis routes failed confirmations back to Phase 1
+//      with the new information (mode: "Didn't confirm? -> Form NEW
+//      hypothesis, return to Phase 1... DON'T add more fixes on top"). A
+//      separate, bounded counter escalates to architecture questioning after
+//      3 failed fix attempts (mode: "3+ failures = architectural problem"),
+//      landing on a human escalation node, not a bare fail or a fourth
+//      silent retry.
+//   4. THE WORK NODES were written last: ReproduceAndInvestigate,
+//      PatternAnalysis, FormAndTestHypothesis, DelegateFix,
+//      VerifyFixIndependently, EscalateArchitecture.
+//
+// No skill subgraph is invoked here. The mode's own four phases already
+// structurally enforce "investigation is YOUR job, fixes are DELEGATED" --
+// adding a persona lens or verification-discipline subgraph on top would add
+// a checkpoint the doctrine doesn't call for; this pipeline stays as small
+// as the real process it renders.
+//
+// Context inputs:
+//   $bug_description - the reported bug/unexpected behavior
+//
+// Context outputs:
+//   debug.root_cause     - the confirmed root cause
+//   debug.fix_commit_sha - commit that fixed it, once VerifyFixIndependently confirms
+
+digraph debug {
+  graph [
+    label="Debug -- four-phase systematic debugging, root cause before fixes",
+    goal="$bug_description",
+    rankdir=LR,
+    default_max_retry=2,
+    default_fidelity="summary:high",
+    model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic; }"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit  [shape=Msquare,  label="Exit"];
+
+  // Phase 1: Reproduce and Investigate.
+  ReproduceAndInvestigate [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Reproduce and Investigate (Phase 1)",
+    prompt="Bug: ${bug_description}\n\nRead error messages and stack traces COMPLETELY -- note line numbers, file paths, error codes. Reproduce consistently: can you trigger it reliably, what are the exact steps? If not reproducible, gather more data -- do not guess. Check recent changes (git diff, git log --oneline -10). In multi-component systems, log what enters/exits each boundary and run once to see WHERE it breaks before analyzing. Trace data flow backward from the error to its source -- fix at source, not symptom.\n\nWrite .resolve/debug/reproduction.json with {\"repro_steps\":\"...\",\"reproducible\":true|false,\"evidence\":\"...\"}. Print the single line: investigated"
+  ];
+
+  // Phase 2: Pattern Analysis.
+  PatternAnalysis [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Pattern Analysis (Phase 2)",
+    prompt="Locate similar working code in the same codebase. If implementing/comparing against a reference pattern, read it completely -- don't skim. Identify every difference between working and broken, however small. Understand what dependencies, config, and assumptions the broken code needs.\n\nWrite .resolve/debug/pattern_analysis.json with {\"working_example\":\"...\",\"differences\":[...]}. Print the single line: pattern_analyzed"
+  ];
+
+  // Phase 3: Hypothesis and Test -- scientific method, one variable at a time.
+  FormAndTestHypothesis [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Form and Test Hypothesis (Phase 3)",
+    prompt="State clearly: 'I think X is the root cause because Y.' Design the SMALLEST test that would confirm or deny this -- one variable at a time. Run it and gather real evidence. Write .resolve/debug/hypothesis.json with {\"hypothesis\":\"...\",\"test\":\"...\",\"confirmed\":true|false,\"evidence\":\"...\"}. If you don't understand something, say so explicitly -- don't pretend to know. Print the single line: hypothesis_tested"
+  ];
+
+  HypothesisGate [
+    shape=parallelogram, label="Hypothesis Confirmed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('confirmed' if json.load(open('.resolve/debug/hypothesis.json'))['confirmed'] else 'not_confirmed')\""
+  ];
+
+  // Phase 4: Fix -- delegated, never done by the orchestrator itself.
+  DelegateFix [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Delegate the Fix (Phase 4)",
+    prompt="Root cause confirmed: $(cat .resolve/debug/hypothesis.json). Delegate to foundation:bug-hunter or kenergy:implementer: reproduce the bug first to confirm it still exists, apply the minimal fix, verify with real execution that the bug is gone, commit. Write .resolve/debug/fix_attempt.json with {\"commit_sha\":\"...\",\"attempt_number\":<int>}. Print the single line: fix_delegated"
+  ];
+
+  // THE GATE. Never trust the fix delegation's own claim -- re-run the
+  // ORIGINAL Phase 1 reproduction steps and read real output.
+  VerifyFixIndependently [
+    shape=parallelogram, label="Verify Fix Independently (re-run original repro)",
+    tool_command="#!/bin/sh\nset -e\npython3 scripts/rerun_repro.py --repro-file .resolve/debug/reproduction.json --at-commit \"$(python3 -c \\\"import json;print(json.load(open('.resolve/debug/fix_attempt.json'))['commit_sha'])\\\")\""
+  ];
+
+  // Bounded escalation: 3+ failures = architectural problem, not a fourth
+  // silent retry. Lands on a human hexagon, matching the mode's explicit
+  // "Discuss with the user before attempting more fixes."
+  CheckAttemptCount [
+    shape=parallelogram, label="Attempt Count",
+    tool_command="#!/bin/sh\nset -e\ncount=$(python3 -c \"import json;print(json.load(open('.resolve/debug/fix_attempt.json'))['attempt_number'])\")\nif [ \"$count\" -lt 3 ]; then printf 'retry'; else printf 'escalate'; fi"
+  ];
+
+  ArchitectureEscalation [
+    shape=hexagon, mode="freeform",
+    label="Question the Architecture (3+ failed fixes)",
+    prompt="This bug has resisted 3 fix attempts. That is an architectural signal, not bad luck. Is this pattern fundamentally sound, or should we refactor the architecture instead of continuing to patch symptoms? What would you like to do?"
+  ];
+
+  Report [
+    shape=box, goal_gate=true, fidelity="summary:high",
+    label="Report",
+    prompt="Bug fixed and independently verified. Root cause: $(cat .resolve/debug/hypothesis.json). Fix commit: $(cat .resolve/debug/fix_attempt.json). Print the single line: reported"
+  ];
+
+  Start                    -> ReproduceAndInvestigate;
+  ReproduceAndInvestigate  -> PatternAnalysis;
+  PatternAnalysis          -> FormAndTestHypothesis;
+  FormAndTestHypothesis    -> HypothesisGate;
+  HypothesisGate           -> DelegateFix               [condition="context.tool.last_line=confirmed", weight="2"];
+  HypothesisGate           -> ReproduceAndInvestigate   [condition="context.tool.last_line=not_confirmed", loop_restart="true", label="new hypothesis, back to Phase 1"];
+
+  DelegateFix              -> VerifyFixIndependently;
+  VerifyFixIndependently   -> Report            [condition="context.tool.last_line=bug_gone", weight="2"];
+  VerifyFixIndependently   -> CheckAttemptCount  [condition="context.tool.last_line=bug_still_present"];
+
+  CheckAttemptCount        -> ReproduceAndInvestigate [condition="context.tool.last_line=retry", loop_restart="true", label="return to Phase 1 with new information"];
+  CheckAttemptCount        -> ArchitectureEscalation  [condition="context.tool.last_line=escalate"];
+  ArchitectureEscalation   -> Exit                    [label="architecture decision made with the user -- likely routes to /think-like-ken"];
+
+  Report                   -> Exit;
+}

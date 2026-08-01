@@ -1,0 +1,179 @@
+// finish.dot
+//
+// Top-level attractor pipeline for /finish: the second and final human
+// checkpoint. Merge, PR, keep, or discard -- an explicit decision, never a
+// default.
+//
+// Source of truth: modes/finish.md, recipes/finish-branch.yaml (the
+// capture-entry-paths worktree/branch containment guard from this bundle's
+// own Task 14 fix, and determine-action's exact-match-only contract from
+// Task 5's fix -- both rendered here as graph nodes rather than recipe
+// steps).
+//
+// DESIGN ORDER (docs/primer.md §3):
+//   1. THE SINK: the chosen action (merge / PR / keep / discard) has
+//      actually happened against the real repository -- confirmed by an
+//      independent check of real state (git log for a merge commit, `gh pr
+//      view` for a PR), never by trusting the action node's own "I merged
+//      it" / "I opened the PR" claim. This is exactly the failure class
+//      docs/RUBRIC.md §2 documents in the attractor-pipelines repo's own
+//      history: an OpenPR-style node can print a plausible URL or claim a
+//      merge landed when it didn't.
+//   2. THE GATE: ConfirmMergeLanded and ConfirmPROpened are deterministic
+//      parallelogram checks against real Git/GitHub state -- built from
+//      `git`/`gh` only, matching this repo's own portability note (never a
+//      platform-specific helper, since these pipelines run wherever a
+//      dot-graph-compatible engine fetches them).
+//   3. THE LOOP: per docs/RUBRIC.md §1, an acyclic pipeline is acceptable
+//      ONLY when it's a deterministic dispatcher with no LLM judgment to
+//      converge (the rubric's own cited example: ship_ready.dot's
+//      runtime-mode deploy branches). Once the human has made the finish
+//      decision, dispatching to the matching action is exactly that kind of
+//      deterministic branch -- so this graph is intentionally acyclic
+//      downstream of the human hexagon. The one place real judgment
+//      remains (did the merge/PR actually land?) is where the evidence
+//      gates sit, not inside a loop.
+//   4. THE WORK NODES were written last: CaptureEntryPaths, FinishDecision,
+//      the four action branches, and their confirmation gates.
+//
+// No skill subgraph is invoked here. Finish is a deterministic dispatch on
+// an explicit human choice, not a judgment task any of this bundle's eight
+// skills addresses -- forcing one in would be exactly the unnecessary
+// structure cranky-old-sam's own lens exists to catch.
+//
+// Context inputs: (none required -- operates on the current worktree)
+//
+// Context outputs:
+//   finish.action        - "merge" | "pr" | "keep" | "discard"
+//   finish.merge_sha      - set only when action=merge and confirmed
+//   finish.pr_url          - set only when action=pr and confirmed
+
+digraph finish {
+  graph [
+    label="Finish -- the second and final human checkpoint",
+    goal="one confirmed finish action",
+    rankdir=LR,
+    default_max_retry=2,
+    default_fidelity="summary:high",
+    model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic; }"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit  [shape=Msquare,  label="Exit"];
+
+  // Faithful to recipes/finish-branch.yaml's capture-entry-paths (Task 14):
+  // capture worktree/branch/main-repo paths ONCE, before anything mutates
+  // directories, and validate the branch matches what's actually checked out
+  // -- reject a caller-supplied branch_name that disagrees with reality.
+  CaptureEntryPaths [
+    shape=parallelogram, label="Capture Entry Paths (before any mutation)",
+    tool_command="#!/bin/sh\nset -e\npython3 scripts/capture_entry_paths.py --worktree \"${WORKTREE_PATH:-$(pwd)}\""
+  ];
+
+  // Human checkpoint 2 of 2. Exact-match-only per Task 5's fix -- no default
+  // action on a blank reply.
+  FinishDecision [
+    shape=hexagon, mode="multiple_choice", options="merge,pr,keep,discard",
+    label="Finish Decision (merge / PR / keep / discard)",
+    prompt="Work is verified and ready. Choose exactly one: merge (fast-forward into the base branch), pr (open a pull request), keep (leave the branch as-is, no action), or discard (delete the branch and worktree -- destructive, requires typed confirmation)."
+  ];
+
+  DetermineAction [
+    shape=parallelogram, label="Determine Action (exact match only)",
+    tool_command="bash -c 'case \"$last_response\" in merge|pr|keep|discard) echo \"$last_response\";; *) echo invalid;; esac'",
+    fidelity="full"
+  ];
+
+  InvalidChoice [
+    shape=box, goal_gate=true, fidelity="summary:high",
+    label="Reject Ambiguous Reply",
+    prompt="The reply did not exactly match merge, pr, keep, or discard. State that plainly and ask again -- do not guess or default to any action. Print the single line: invalid_reported"
+  ];
+
+  ExecuteMerge [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Execute Merge",
+    prompt="cd ${entry_paths.main_repo_path}. Fast-forward merge ${entry_paths.branch_name} into its base branch. Do not force-push. Write .resolve/finish/merge_attempt.json with {\"attempted_sha\":\"...\"}. Print the single line: merge_attempted"
+  ];
+
+  ConfirmMergeLanded [
+    shape=parallelogram, label="Confirm Merge Landed (git log, not the claim)",
+    tool_command="#!/bin/sh\nset -e\nsha=$(python3 -c \"import json;print(json.load(open('.resolve/finish/merge_attempt.json'))['attempted_sha'])\")\nif git -C \"$MAIN_REPO_PATH\" log --oneline -1 | grep -q \"$sha\"; then printf 'merge_confirmed'; else printf 'merge_unconfirmed'; fi",
+    env="MAIN_REPO_PATH=$entry_paths.main_repo_path"
+  ];
+
+  ExecutePR [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Execute Open PR",
+    prompt="cd ${entry_paths.main_repo_path}. Push ${entry_paths.branch_name} and open a PR via gh pr create. Write .resolve/finish/pr_attempt.json with {\"attempted_url\":\"...\"}. Print the single line: pr_attempted"
+  ];
+
+  // Faithful to this repo's own deliver_pr.dot CheckPROpened case study
+  // (docs/RUBRIC.md §2): never trust a printed URL as proof a PR exists.
+  ConfirmPROpened [
+    shape=parallelogram, label="Confirm PR Opened (gh pr view, not the claim)",
+    tool_command="#!/bin/sh\nset -e\nurl=$(python3 -c \"import json;print(json.load(open('.resolve/finish/pr_attempt.json'))['attempted_url'])\")\nif gh pr view \"$url\" >/dev/null 2>&1; then printf 'pr_confirmed'; else printf 'pr_unconfirmed'; fi"
+  ];
+
+  Keep [
+    shape=box, goal_gate=true, fidelity="summary:high",
+    label="Keep As-Is",
+    prompt="No action taken. Branch ${entry_paths.branch_name} remains at ${entry_paths.worktree_path} for later. Print the single line: kept"
+  ];
+
+  // Destructive -- requires a typed confirmation, per modes/finish.md's
+  // discard safety ritual (not available in the automated recipe path per
+  // this bundle's own Task 15 fix; only the interactive mode carries it).
+  DiscardConfirmation [
+    shape=hexagon, mode="freeform",
+    label="Typed Discard Confirmation",
+    prompt="Discard is destructive: it deletes ${entry_paths.branch_name} and its worktree at ${entry_paths.worktree_path}. Type the exact branch name to confirm, or anything else to cancel."
+  ];
+
+  CheckDiscardConfirmation [
+    shape=parallelogram, label="Confirmation Matches Branch Name?",
+    tool_command="bash -c 'if [ \"$last_response\" = \"$BRANCH_NAME\" ]; then echo confirmed; else echo cancelled; fi'",
+    env="BRANCH_NAME=$entry_paths.branch_name",
+    fidelity="full"
+  ];
+
+  ExecuteDiscard [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Execute Discard",
+    prompt="cd ${entry_paths.main_repo_path}. git worktree remove ${entry_paths.worktree_path} then delete branch ${entry_paths.branch_name}. Print the single line: discarded"
+  ];
+
+  Report [
+    shape=box, goal_gate=true, fidelity="summary:high",
+    label="Report",
+    prompt="Report the confirmed finish outcome plainly -- merge sha, PR URL, kept location, or discard confirmation. Do not claim an action succeeded that was not independently confirmed above. Print the single line: reported"
+  ];
+
+  Start                     -> CaptureEntryPaths;
+  CaptureEntryPaths          -> FinishDecision;
+  FinishDecision              -> DetermineAction [fidelity="full"];
+
+  DetermineAction              -> ExecuteMerge     [condition="context.tool.last_line=merge"];
+  DetermineAction               -> ExecutePR        [condition="context.tool.last_line=pr"];
+  DetermineAction                -> Keep            [condition="context.tool.last_line=keep"];
+  DetermineAction                 -> DiscardConfirmation [condition="context.tool.last_line=discard"];
+  DetermineAction                  -> InvalidChoice     [condition="context.tool.last_line=invalid"];
+  InvalidChoice                     -> FinishDecision [loop_restart="true"];
+
+  ExecuteMerge                       -> ConfirmMergeLanded;
+  ConfirmMergeLanded                  -> Report [condition="context.tool.last_line=merge_confirmed", weight="2"];
+  ConfirmMergeLanded                   -> ExecuteMerge [condition="context.tool.last_line=merge_unconfirmed", label="retry once, bounded by default_max_retry=2"];
+
+  ExecutePR                             -> ConfirmPROpened;
+  ConfirmPROpened                        -> Report [condition="context.tool.last_line=pr_confirmed", weight="2"];
+  ConfirmPROpened                         -> ExecutePR [condition="context.tool.last_line=pr_unconfirmed", label="retry once, bounded by default_max_retry=2"];
+
+  Keep                                     -> Report;
+
+  DiscardConfirmation                       -> CheckDiscardConfirmation [fidelity="full"];
+  CheckDiscardConfirmation                   -> ExecuteDiscard [condition="context.tool.last_line=confirmed"];
+  CheckDiscardConfirmation                    -> Report        [condition="context.tool.last_line=cancelled", label="cancelled -- no action taken"];
+  ExecuteDiscard                               -> Report;
+
+  Report                                        -> Exit;
+}

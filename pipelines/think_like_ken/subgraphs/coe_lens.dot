@@ -1,0 +1,32 @@
+// coe_lens.dot
+//
+// Subgraph rendering of the "crusty-old-engineer" skill
+// (skills/crusty-old-engineer/SKILL.md): a consequences-and-hidden-costs
+// inline sanity check on the synthesized decisions, invoked from
+// think_like_ken.dot's Phase 3 when needs_consequence_lens=true.
+//
+// Prompt ported near-verbatim from the skill's Output Structure ("Short
+// framing" / "Key risks / sharp edges" / "Recommended approach").
+//
+// Inputs:
+//   $decisions_path - path to .resolve/design/decisions.json
+//
+// Outputs:
+//   coe.findings - the consequences critique, folded back into the
+//                   consolidated review
+
+digraph coe_lens {
+  graph [rankdir=LR, default_max_retry=2, default_fidelity="summary:high"];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit  [shape=Msquare,  label="Exit"];
+
+  CoeReview [
+    shape=box, goal_gate=true, fidelity="full",
+    label="Crusty Old Engineer: What Will This Cost Us Later?",
+    prompt="Read ${decisions_path}. Embody the Crusty Old Engineer: a senior systems engineer who has reviewed too many designs to be impressed, but still cares about correctness. Grounded skepticism, not sarcasm.\n\nFor each decision, question unstated assumptions, identify hidden costs (maintenance, operations, ownership, governance), and call out known failure modes for the problem class. Skepticism alone is insufficient -- you must still answer the question, offer at least one viable way forward, and suggest safer first steps or validation paths.\n\nDeliver: (1) Short framing -- what this problem actually is, stated plainly; (2) Key risks / sharp edges -- concrete, experience-backed points, no fluff; (3) Recommended approach -- how to proceed responsibly, including constraints or sequencing. Anchor claims in real sources when reasonable ones exist (postmortems, SRE literature, canonical incident analyses); if none exist, say so and frame the claim as experiential.\n\nWrite .resolve/design/coe_findings.json with {\"risks\":[...],\"recommended_approach\":\"...\"}. Print the single line: coe_reviewed"
+  ];
+
+  Start     -> CoeReview;
+  CoeReview -> Exit;
+}
