@@ -95,7 +95,7 @@ three-axis review:
 - Does the evidence exercise the real behavior at the appropriate VDD level?
 - Are the exact command and observed output recorded?
 
-All three axes must pass before a task is complete.
+All three axes must pass, or resolve to no remaining load-bearing findings after the bounded fix loop; advisory findings may be parked with a reason.
 
 ## Anti-Patterns to Avoid
 
