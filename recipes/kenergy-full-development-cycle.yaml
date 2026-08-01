@@ -400,12 +400,19 @@ stages:
       - id: "determine-action"
         type: "bash"
         command: |
-          set -e
-          ACTION="{{_approval_message}}"
-          if [ -z "$ACTION" ]; then
-            ACTION="pr"
-          fi
-          echo "{\"action\": \"${ACTION}\"}"
+          set -eu
+          ACTION=$(printf '%s' "${APPROVAL_MESSAGE:-}" | tr '[:upper:]' '[:lower:]')
+          case "$ACTION" in
+            merge|pr|keep)
+              printf '{"action":"%s"}\n' "$ACTION"
+              ;;
+            *)
+              printf '%s\n' 'BLOCKED: finish action not specified — approve with an explicit message of merge, pr, or keep' >&2
+              exit 1
+              ;;
+          esac
+        env:
+          APPROVAL_MESSAGE: "{{_approval_message}}"
         parse_json: true
         output: "finish_action"
         timeout: 30
