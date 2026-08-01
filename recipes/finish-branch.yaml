@@ -51,9 +51,18 @@ stages:
                   ["git", "rev-parse", "--show-toplevel"], text=True
               ).strip()
           ).resolve()
-          branch = "{{branch_name}}".strip() or subprocess.check_output(
+          actual_branch = subprocess.check_output(
               ["git", "-C", str(worktree), "branch", "--show-current"], text=True
           ).strip()
+          supplied_branch = "{{branch_name}}".strip()
+          if not actual_branch:
+              raise SystemExit("ERROR: captured worktree is detached; a branch is required")
+          if supplied_branch and supplied_branch != actual_branch:
+              raise SystemExit(
+                  f"ERROR: branch_name {supplied_branch!r} does not match "
+                  f"worktree branch {actual_branch!r}"
+              )
+          branch = actual_branch
           common = Path(subprocess.check_output(
               ["git", "-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"],
               text=True,
