@@ -1,0 +1,138 @@
+# Kenergy prompt-evaluation environment.
+#
+# Runs a real Amplifier install with the LOCAL kenergy bundle (working-tree
+# snapshot, mirrored into a host-side Gitea) composed as an app bundle, so a
+# full /think-like-ken -> /plan-like-ken -> /build-like-ken cycle can be driven
+# end-to-end against actual software builds.
+#
+# The bundle is referenced by its real upstream URL
+# (github.com/kenotron-ms/amplifier-bundle-kenergy); url_rewrites redirects that
+# clone to the Gitea mirror, so the local working tree is what actually loads.
+#
+# LLM API traffic (api.anthropic.com / api.openai.com) is exempted from the
+# mitmproxy so streaming responses are not buffered.
+#
+# Required launch vars:
+#   GITEA_URL   -- Gitea base URL reachable from inside the container
+#                  (e.g. http://10.9.113.1:10150)
+#   GITEA_TOKEN -- Gitea API token
+#
+# Launch:
+#   amplifier-digital-twin launch \
+#     .amplifier/digital-twin-universe/profiles/kenergy-eval.yaml \
+#     --name kenergy-eval \
+#     --var GITEA_URL=http://10.9.113.1:10150 \
+#     --var GITEA_TOKEN=<token>
+name: kenergy-eval
+description: >
+  Amplifier environment with the locally-mirrored kenergy bundle composed as an
+  app bundle, for exercising the think -> plan -> build mode chain.
+
+base:
+  image: ubuntu:24.04
+  config:
+    limits.cpu: "6"
+    limits.memory: 12GiB
+
+url_rewrites:
+  auth:
+    username: admin
+    token_var: GITEA_TOKEN
+  # Defensive only -- inert for this profile. The rewritten URL is fetched by
+  # amplifier's own `git clone` (bundle resolution), not by uv; the only uv git
+  # install here (microsoft/amplifier) is intentionally NOT rewritten. Kept so
+  # the profile stays correct if a uv-installed source is rewritten later.
+  allow_uv_github_fast_path: false
+  default_match_mode: boundary
+  rules:
+    - match: github.com/kenotron-ms/amplifier-bundle-kenergy
+      target: ${GITEA_URL}/admin/amplifier-bundle-kenergy
+
+passthrough:
+  allow_external: true
+  services:
+    - name: anthropic
+      key_env: ANTHROPIC_API_KEY
+    - name: anthropic-base-url
+      key_env: ANTHROPIC_BASE_URL
+    - name: openai
+      key_env: OPENAI_API_KEY
+    - name: openai-base-url
+      key_env: OPENAI_BASE_URL
+
+provision:
+  setup_cmds:
+    # System deps
+    - apt-get update && apt-get install -y git curl jq ripgrep ca-certificates less
+
+    # Keep LLM API traffic off mitmproxy so SSE streams are not buffered.
+    # Sorts after /etc/profile.d/dtu-env.sh so it extends the proxy env vars.
+    - |
+      cat > /etc/profile.d/zz-llm-no-proxy.sh << 'EOF'
+      export no_proxy="${no_proxy:+$no_proxy,}api.anthropic.com,api.openai.com"
+      export NO_PROXY="$no_proxy"
+      EOF
+      chmod 0644 /etc/profile.d/zz-llm-no-proxy.sh
+
+    # Package manager
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    # Amplifier CLI from upstream
+    - uv tool install git+https://github.com/microsoft/amplifier
+    - amplifier --version
+
+    # Git identity so build-mode commits/branches work
+    - git config --global user.email "eval@kenergy-dtu.local" && git config --global user.name "Kenergy Eval" && git config --global init.defaultBranch main
+
+    # Provider config (keys arrive via passthrough)
+    - |
+      mkdir -p /root/.amplifier
+      cat > /root/.amplifier/settings.yaml << EOF
+      config:
+        providers:
+          - module: provider-anthropic
+            source: git+https://github.com/microsoft/amplifier-module-provider-anthropic@main
+            config:
+              api_key: $ANTHROPIC_API_KEY
+              base_url: $ANTHROPIC_BASE_URL
+              default_model: claude-sonnet-5
+              enable_prompt_caching: "true"
+              priority: 1
+          - module: provider-openai
+            source: git+https://github.com/microsoft/amplifier-module-provider-openai@main
+            config:
+              api_key: $OPENAI_API_KEY
+              base_url: $OPENAI_BASE_URL
+              default_model: gpt-5.5
+              priority: 2
+      EOF
+
+    # Compose the kenergy bundle onto every session.
+    # This URL is rewritten to the Gitea mirror of the local working tree.
+    - amplifier bundle add git+https://github.com/kenotron-ms/amplifier-bundle-kenergy@main --app
+
+    # Prove the bundle resolved and registered under its own metadata name
+    - amplifier bundle show kenergy
+
+    # Workspaces the eval can build software in
+    - mkdir -p /root/eval/scratch
+
+    # Warm-up so the first readiness smoke does not race the cold module install
+    - 'amplifier run "Say exactly: warmup-ok"'
+
+update:
+  cmds:
+    # Drop cached bundle clones so a freshly-pushed kenergy snapshot is re-fetched
+    - amplifier reset --remove cache -y
+    - amplifier bundle add git+https://github.com/kenotron-ms/amplifier-bundle-kenergy@main --app
+    - 'amplifier run "Say exactly: warmup-ok"'
+
+readiness:
+  - name: amplifier-installed
+    command: amplifier --version
+  - name: kenergy-bundle-registered
+    command: amplifier bundle show kenergy
+  - name: kenergy-modes-present
+    command: ls /root/.amplifier/cache/*kenergy*/modes/think-like-ken.md
+  - name: providers-smoke
+    command: 'amplifier run "Say exactly: dtu-ready"'
