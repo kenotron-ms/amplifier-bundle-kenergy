@@ -149,10 +149,38 @@ Confirm that the delegated save path exists and that the plan contains:
 
 Only a plan that passes all checks can move to execution.
 
-### 5. Hand directly to continuous execution
+### 5. Create an isolated feature worktree, then hand directly to continuous execution
 
-Transition to `/build-like-ken`, provide the saved plan path and repository root,
-and execute the continuous task workflow immediately:
+`subagent-driven-development.yaml` enforces worktree isolation: it refuses to
+run against the repository root or the repo's default branch. Create a
+dedicated feature worktree and branch before invoking it, mirroring the
+pattern used in `kenergy-full-development-cycle.yaml`:
+
+```python
+delegate(
+  agent="foundation:git-ops",
+  instruction="""Create a git worktree for feature development.
+
+Repository root: <repository-root>
+Feature slug: <feature-slug> (derived from the plan/feature name)
+
+Steps:
+1. Verify we're in a git repository.
+2. Check that .gitignore includes .worktrees/.
+3. Create the worktree: git worktree add .worktrees/<feature-slug> -b feature/<feature-slug>
+4. Verify the worktree was created.
+5. Copy the saved plan into the worktree at the same relative path.
+6. Run static analysis in the worktree to establish a clean baseline.
+
+Report the full absolute worktree path and branch name.""",
+  context_depth="none",
+  model_role="fast",
+)
+```
+
+Then transition to `/build-like-ken`, provide the saved plan path (as it now
+exists inside the new worktree) and the worktree path (never the repository
+root), and execute the continuous task workflow immediately:
 
 ```python
 mode(operation="set", name="build-like-ken")
@@ -161,8 +189,8 @@ recipes(
   operation="execute",
   recipe_path="@kenergy:recipes/subagent-driven-development.yaml",
   context={
-    "plan_path": "<saved-plan-path>",
-    "worktree_path": "<repository-root>",
+    "plan_path": "<saved-plan-path-inside-worktree>",
+    "worktree_path": "<created-feature-worktree-path>",
   },
 )
 ```

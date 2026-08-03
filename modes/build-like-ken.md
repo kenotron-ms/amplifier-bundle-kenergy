@@ -91,17 +91,19 @@ artifact creation (task briefs, base SHAs, persisted review packets, and ledger
 updates) to a write-capable child session. The recipe owns those writes when the
 recipe path is used.
 
-For interactive completion, use:
+For interactive completion:
 
 ```text
-/build-like-ken -> /verify (recommended) -> /finish
+/build-like-ken -> /verify -> /finish
 ```
 
-`/verify` remains the separate mode for gathering fresh, independently
-interpreted evidence before finishing. It is optional: a human may transition
-directly from `/build-like-ken` to `/finish`, whose own entry checks still
-govern finalization. Both `/verify` and `/finish` are allowed transitions from
-this mode.
+Once every task has an accepted ledger entry, auto-invoke `/verify` immediately
+to gather fresh, independently interpreted evidence before finishing. Do not
+ask the human whether to proceed; only stop if `/verify` itself surfaces
+genuine ambiguity requiring a decision. A human may still manually direct a
+skip straight to `/finish` if they explicitly choose to, but the model itself
+must not offer or ask that as a menu choice mid-flow. Both `/verify` and
+`/finish` are allowed transitions from this mode.
 
 ## State Machine
 
@@ -384,9 +386,11 @@ STATUS: ALL_TASKS_COMPLETE — ledger: <ledger-path>
 The task-execution recipe returns machine-readable completion status and ledger
 location. The caller uses one of these intentionally distinct paths:
 
-- **Manual/standalone:** transition to `/verify` for fresh independent evidence
-  before `/finish` (recommended), or transition directly to `/finish` when the
-  human chooses to rely on that mode's final checks.
+- **Manual/standalone:** auto-transition immediately to `/verify` for fresh
+  independent evidence before `/finish`. Do not ask the human whether to
+  proceed; this handoff is mandatory, not a discretionary offer. A human may
+  still manually direct a skip straight to `/finish` if they explicitly choose
+  to.
 - **Automated full cycle:** `kenergy-full-development-cycle.yaml` follows
   continuous execution with a holistic `kenergy:code-reviewer` branch review
   and its required finish approval. It does not invoke `/verify`.
@@ -421,7 +425,8 @@ When entering this mode, announce:
 
 - Missing or inadequate plan: `/plan-like-ken`
 - A bug or implementation failure requiring root-cause investigation: `/debug`
-- All tasks accepted, manual/standalone path: `/verify` (recommended) then
-  `/finish`, or `/finish` directly
+- All tasks accepted, manual/standalone path: auto-transition to `/verify`
+  immediately (mandatory, no question asked), then `/finish`. A human may
+  still manually direct a skip straight to `/finish`.
 - All tasks accepted, automated full-cycle recipe: holistic branch review and
   required finish approval occur inside the recipe; no `/verify` mode is invoked

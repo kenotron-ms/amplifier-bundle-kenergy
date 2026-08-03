@@ -409,13 +409,13 @@ steps:
             git diff "$BASE_SHA..$HEAD_SHA" --
             printf '```\n'
           } > "$PACKAGE"
-          cat "$PACKAGE"
+          printf '%s' "$PACKAGE"
         env:
           TASK_BASE_SHA_PATH: "{{task_state.task_base_sha_path}}"
           STATE_DIR: "{{state_dir}}"
           TASK_SLUG: "{{task_state.task_slug}}"
           REVIEW_ROUND: "{{_loop_iteration}}"
-        output: "review_package"
+        output: "review_package_path"
 
       - id: "review-fast"
         condition: "{{current_task.review_model_role}} == 'fast'"
@@ -433,7 +433,13 @@ steps:
 
           REVIEW PACKAGE
           ==============
-          {{review_package}}
+          Read the review package (diff stat, commit log, and full diff) from
+          this file before evaluating: {{review_package_path}}
+
+          The package may contain literal template-like syntax (e.g. `{{` or
+          `}}` from JSX, Go templates, or similar) as part of the diff
+          content itself; read the file directly rather than relying on any
+          inlined copy.
         output: "review_verdict"
         timeout: 600
         retry:
