@@ -88,8 +88,7 @@ digraph think_like_ken {
 
   RecordForkAnswers [
     shape=parallelogram, label="Record Fork Answers",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/append_fork_answers.py --reply \"$LAST_RESPONSE\"\nprintf 'recorded'",
-    env="LAST_RESPONSE=$last_response"
+    tool_command="#!/bin/sh\nset -e\npython3 scripts/append_fork_answers.py --reply \"${last_response}\"\nprintf 'recorded'"
   ];
 
   // Phase 3: Synthesize Evidence-Backed Decisions, with an optional inline

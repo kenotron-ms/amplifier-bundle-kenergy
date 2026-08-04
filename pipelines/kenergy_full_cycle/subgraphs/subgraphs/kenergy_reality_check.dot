@@ -33,8 +33,7 @@ digraph kenergy_reality_check {
 
   RouteMode [
     shape=parallelogram, label="Pre-work or Post-work?",
-    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"$MODE\"",
-    env="MODE=$mode"
+    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"${mode}\""
   ];
 
   // Faithful to SKILL.md Core Behavior 1 ("Pre-Work: Define the Verification

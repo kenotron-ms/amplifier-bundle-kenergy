@@ -98,8 +98,7 @@ digraph finish {
 
   ConfirmMergeLanded [
     shape=parallelogram, label="Confirm Merge Landed (git log, not the claim)",
-    tool_command="#!/bin/sh\nset -e\nsha=$(python3 -c \"import json;print(json.load(open('.resolve/finish/merge_attempt.json'))['attempted_sha'])\")\nif git -C \"$MAIN_REPO_PATH\" log --oneline -1 | grep -q \"$sha\"; then printf 'merge_confirmed'; else printf 'merge_unconfirmed'; fi",
-    env="MAIN_REPO_PATH=$entry_paths.main_repo_path"
+    tool_command="#!/bin/sh\nset -e\nsha=$(python3 -c \"import json;print(json.load(open('.resolve/finish/merge_attempt.json'))['attempted_sha'])\")\nif git -C \"${entry_paths.main_repo_path}\" log --oneline -1 | grep -q \"$sha\"; then printf 'merge_confirmed'; else printf 'merge_unconfirmed'; fi"
   ];
 
   ExecutePR [
@@ -132,8 +131,7 @@ digraph finish {
 
   CheckDiscardConfirmation [
     shape=parallelogram, label="Confirmation Matches Branch Name?",
-    tool_command="bash -c 'if [ \"$last_response\" = \"$BRANCH_NAME\" ]; then echo confirmed; else echo cancelled; fi'",
-    env="BRANCH_NAME=$entry_paths.branch_name",
+    tool_command="bash -c 'if [ \"${last_response}\" = \"${entry_paths.branch_name}\" ]; then echo confirmed; else echo cancelled; fi'",
     fidelity="full"
   ];
 

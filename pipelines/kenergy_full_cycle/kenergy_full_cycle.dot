@@ -97,8 +97,7 @@ digraph kenergy_full_cycle {
   // finished" means all tasks landed.
   CheckBuildVerdict [
     shape=parallelogram, label="Check build.verdict (not just that the node returned)",
-    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"$BUILD_VERDICT\"",
-    env="BUILD_VERDICT=$context.build.verdict"
+    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"${context.build.verdict}\""
   ];
 
   Debug [
@@ -135,8 +134,7 @@ digraph kenergy_full_cycle {
   // THE GATE for verify's return.
   CheckVerifyVerdict [
     shape=parallelogram, label="Check verify.verdict",
-    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"$VERIFY_VERDICT\"",
-    env="VERIFY_VERDICT=$context.verify.verdict"
+    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"${context.verify.verdict}\""
   ];
 
   Finish [

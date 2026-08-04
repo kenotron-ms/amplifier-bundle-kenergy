@@ -71,8 +71,7 @@ digraph build_like_ken {
   // ledger-identity invariant, rendered as a gate) ---
   ValidateLedgerIdentity [
     shape=parallelogram, label="Validate Ledger Identity",
-    tool_command="#!/bin/sh\nset -e\nmkdir -p \"$(dirname \"$LEDGER_PATH\")\"\nfirst=\"# Plan: $PLAN_PATH\"\nif [ -f \"$LEDGER_PATH\" ]; then\n  actual=$(head -n1 \"$LEDGER_PATH\")\n  if [ \"$actual\" != \"$first\" ]; then printf 'identity_mismatch'; exit 0; fi\nelse\n  printf '%s\\n\\n## Completed Tasks\\n\\n## Parked Findings\\n' \"$first\" > \"$LEDGER_PATH\"\nfi\nprintf 'identity_ok'",
-    env="PLAN_PATH=$plan_path,LEDGER_PATH=$execution_root/.kenergy/sdd/ledger.md"
+    tool_command="#!/bin/sh\nset -e\nLEDGER_PATH=\"${execution_root}/.kenergy/sdd/ledger.md\"\nmkdir -p \"$(dirname \"$LEDGER_PATH\")\"\nfirst=\"# Plan: ${plan_path}\"\nif [ -f \"$LEDGER_PATH\" ]; then\n  actual=$(head -n1 \"$LEDGER_PATH\")\n  if [ \"$actual\" != \"$first\" ]; then printf 'identity_mismatch'; exit 0; fi\nelse\n  printf '%s\\n\\n## Completed Tasks\\n\\n## Parked Findings\\n' \"$first\" > \"$LEDGER_PATH\"\nfi\nprintf 'identity_ok'"
   ];
 
   // --- One-shot pre-flight scan for whole-plan contradictions (Task 4's
@@ -171,8 +170,7 @@ digraph build_like_ken {
   // never trust that both things happened just because the node said so. ---
   ConfirmVerdictAgainstRepo [
     shape=parallelogram, label="Confirm Verdict Against Repo (evidence gate)",
-    tool_command="#!/bin/sh\nset -e\nverdict=$(python3 -c \"import json;d=json.load(open('.resolve/review/verdict.json'));print(d.get('verdict','fail'))\" 2>/dev/null || echo fail)\nsha=$(python3 -c \"import json;d=json.load(open('.resolve/review/verdict.json'));print(d.get('commit_sha',''))\" 2>/dev/null || echo '')\nif [ \"$verdict\" = \"pass\" ] && [ -n \"$sha\" ] && git -C \"$EXECUTION_ROOT\" cat-file -e \"$sha\" 2>/dev/null; then\n  printf 'confirmed_pass'\nelse\n  printf 'unconfirmed_or_fail'\nfi",
-    env="EXECUTION_ROOT=$execution_root"
+    tool_command="#!/bin/sh\nset -e\nverdict=$(python3 -c \"import json;d=json.load(open('.resolve/review/verdict.json'));print(d.get('verdict','fail'))\" 2>/dev/null || echo fail)\nsha=$(python3 -c \"import json;d=json.load(open('.resolve/review/verdict.json'));print(d.get('commit_sha',''))\" 2>/dev/null || echo '')\nif [ \"$verdict\" = \"pass\" ] && [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then\n  printf 'confirmed_pass'\nelse\n  printf 'unconfirmed_or_fail'\nfi"
   ];
 
   // --- Bound: five fixes, six reviews. Round counter is a decision point,
