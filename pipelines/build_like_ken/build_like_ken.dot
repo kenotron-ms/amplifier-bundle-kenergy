@@ -80,12 +80,12 @@ digraph build_like_ken {
   PreflightConflictScan [
     shape=box, goal_gate=true, fidelity="summary:high",
     label="Pre-flight Conflict Scan",
-    prompt="Read $plan_path in full, once. Scan every task for contradictions against each other, against the plan's Global Constraints, or against a mandate the merged reviewer would necessarily reject (e.g. two tasks pinning incompatible versions of the same dependency). Do NOT flag stylistic disagreements or things a reasonable engineer would resolve unassisted -- only genuine, unresolvable contradictions that only a human can adjudicate. Write .resolve/build/preflight.json with either {\"status\":\"clear\"} or {\"status\":\"conflicts\",\"conflicts\":[{\"tasks\":[...],\"question\":\"...\"}]}. Print the single line: preflight_scanned"
+    prompt="Read $plan_path in full, once. Scan every task for contradictions against each other, against the plan's Global Constraints, or against a mandate the merged reviewer would necessarily reject (e.g. two tasks pinning incompatible versions of the same dependency). Do NOT flag stylistic disagreements or things a reasonable engineer would resolve unassisted -- only genuine, unresolvable contradictions that only a human can adjudicate. Write ${execution_root}/.resolve/build/preflight.json with either {\"status\":\"clear\"} or {\"status\":\"conflicts\",\"conflicts\":[{\"tasks\":[...],\"question\":\"...\"}]}. Print the single line: preflight_scanned"
   ];
 
   PreflightGate [
     shape=parallelogram, label="Pre-flight Gate",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('.resolve/build/preflight.json'));print(d['status'])\""
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/build/preflight.json'));print(d['status'])\""
   ];
 
   // Batched, not one-question-per-conflict -- matches think-like-ken's own
@@ -93,7 +93,7 @@ digraph build_like_ken {
   PlanConflictEscalation [
     shape=hexagon, mode="freeform",
     label="Plan Conflict Escalation (batched)",
-    prompt="The plan has genuine internal contradictions that only you can resolve -- see .resolve/build/preflight.json for the full list. All questions are batched below; answer them together, then this pipeline will exit so the plan can be revised through /plan-like-ken before re-running.\n\n${tool.last_output}"
+    prompt="The plan has genuine internal contradictions that only you can resolve -- see ${execution_root}/.resolve/build/preflight.json for the full list. All questions are batched below; answer them together, then this pipeline will exit so the plan can be revised through /plan-like-ken before re-running.\n\n${tool.last_output}"
   ];
 
   // --- Task selection (deterministic; never guesses from conversation memory) ---
@@ -122,7 +122,7 @@ digraph build_like_ken {
   Implement [
     shape=box, goal_gate=true, fidelity="full",
     label="Implementer (VDD, not TDD)",
-    prompt="IMPLEMENT ONE TASK\n\nEXECUTION ROOT: ${execution_root}\n\nTASK GOAL\n=========\nTask ID: ${task_id}\nGoal: ${task_goal}\nSpecification: ${task_spec}\nAcceptance Criteria: ${task_acceptance}\nInterfaces: ${task_interfaces}\n\nMinimum proof required (from kenergy pre-work criteria): ${criteria.minimum_proof}\n\nImplement exactly this task and nothing else -- no unrequested scope. Run the task's exact static analysis command first, fix any pre-existing issue it surfaces, then implement. Run static analysis again, then verify with REAL execution at the level the plan specifies -- if it says curl, curl it; if it says browser, open the browser; if it's a script, run it. Do not substitute a unit test for non-library code. Document the actual output you saw. Commit atomically. Write .resolve/build/impl_${task_id}.json with {\"status\":\"DONE\"|\"DONE_WITH_CONCERNS\"|\"NEEDS_CONTEXT\"|\"BLOCKED\", \"commit_sha\":\"...\", \"verification_level\":\"static|script|http|browser|dtu\", \"concerns\":\"...\"}. Print the single line: implement_done"
+    prompt="IMPLEMENT ONE TASK\n\nEXECUTION ROOT: ${execution_root}\n\nTASK GOAL\n=========\nTask ID: ${task_id}\nGoal: ${task_goal}\nSpecification: ${task_spec}\nAcceptance Criteria: ${task_acceptance}\nInterfaces: ${task_interfaces}\n\nMinimum proof required (from kenergy pre-work criteria): ${criteria.minimum_proof}\n\nImplement exactly this task and nothing else -- no unrequested scope. Run the task's exact static analysis command first, fix any pre-existing issue it surfaces, then implement. Run static analysis again, then verify with REAL execution at the level the plan specifies -- if it says curl, curl it; if it says browser, open the browser; if it's a script, run it. Do not substitute a unit test for non-library code. Document the actual output you saw. Commit atomically. Write ${execution_root}/.resolve/build/impl_${task_id}.json with {\"status\":\"DONE\"|\"DONE_WITH_CONCERNS\"|\"NEEDS_CONTEXT\"|\"BLOCKED\", \"commit_sha\":\"...\", \"verification_level\":\"static|script|http|browser|dtu\", \"concerns\":\"...\"}. Print the single line: implement_done"
   ];
 
   // --- Verification-level router: reads the FILE the implementer just wrote
@@ -131,7 +131,7 @@ digraph build_like_ken {
   // the review packet already contains the right kind of proof. ---
   RouteVerificationLevel [
     shape=parallelogram, label="Route on Declared Verification Level",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('.resolve/build/impl_${task_id}.json'))['verification_level'])\""
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('${execution_root}/.resolve/build/impl_${task_id}.json'))['verification_level'])\""
   ];
 
   ScenarioVerificationGate [
@@ -160,7 +160,7 @@ digraph build_like_ken {
   Reviewer [
     shape=box, goal_gate=true, fidelity="full",
     label="Reviewer (spec/goal, quality, verification -- one verdict)",
-    prompt="TASK GOAL\n=========\nTask ID: ${task_id}\nGoal: ${task_goal}\nSpecification: ${task_spec}\nAcceptance Criteria: ${task_acceptance}\nInterfaces: ${task_interfaces}\n\nREVIEW PACKAGE\n==============\n${review_package}\n\nAdditional evidence, if gathered: ${scenario.report_path} ${integration.report_path}\n\nIf TASK GOAL or REVIEW PACKAGE is missing, refuse: write .resolve/review/verdict.json with {\"verdict\":\"refused\",\"missing\":\"task_goal\"|\"review_package\"} and stop.\n\nOtherwise review three axes in one pass: (1) Spec/Goal Compliance -- every requested behavior present, nothing unrequested added; (2) Quality -- correctness, clarity, error handling, no speculative complexity; (3) Verification Adequacy -- apply the falsifiability test: name one production change that would make the claimed check fail. Grep and string-presence checks prove documentation cleanup, not runtime behavior -- reject them as sole evidence for behavioral claims. Tag every finding LOAD-BEARING or ADVISORY. Write .resolve/review/verdict.json with {\"verdict\":\"pass\"|\"fail\",\"commit_sha\":\"<the sha you reviewed>\",\"findings\":[{\"severity\":\"load-bearing\"|\"advisory\",\"detail\":\"...\"}]}. Print the single line: review_done"
+    prompt="TASK GOAL\n=========\nTask ID: ${task_id}\nGoal: ${task_goal}\nSpecification: ${task_spec}\nAcceptance Criteria: ${task_acceptance}\nInterfaces: ${task_interfaces}\n\nREVIEW PACKAGE\n==============\n${review_package}\n\nAdditional evidence, if gathered: ${scenario.report_path} ${integration.report_path}\n\nIf TASK GOAL or REVIEW PACKAGE is missing, refuse: write ${execution_root}/.resolve/review/verdict.json with {\"verdict\":\"refused\",\"missing\":\"task_goal\"|\"review_package\"} and stop.\n\nOtherwise review three axes in one pass: (1) Spec/Goal Compliance -- every requested behavior present, nothing unrequested added; (2) Quality -- correctness, clarity, error handling, no speculative complexity; (3) Verification Adequacy -- apply the falsifiability test: name one production change that would make the claimed check fail. Grep and string-presence checks prove documentation cleanup, not runtime behavior -- reject them as sole evidence for behavioral claims. Tag every finding LOAD-BEARING or ADVISORY. Write ${execution_root}/.resolve/review/verdict.json with {\"verdict\":\"pass\"|\"fail\",\"commit_sha\":\"<the sha you reviewed>\",\"findings\":[{\"severity\":\"load-bearing\"|\"advisory\",\"detail\":\"...\"}]}. Print the single line: review_done"
   ];
 
   // --- THE GATE. Self-reported-claims-not-evidence, per RUBRIC.md §2: a box
@@ -170,7 +170,7 @@ digraph build_like_ken {
   // never trust that both things happened just because the node said so. ---
   ConfirmVerdictAgainstRepo [
     shape=parallelogram, label="Confirm Verdict Against Repo (evidence gate)",
-    tool_command="#!/bin/sh\nset -e\nverdict=$(python3 -c \"import json;d=json.load(open('.resolve/review/verdict.json'));print(d.get('verdict','fail'))\" 2>/dev/null || echo fail)\nsha=$(python3 -c \"import json;d=json.load(open('.resolve/review/verdict.json'));print(d.get('commit_sha',''))\" 2>/dev/null || echo '')\nif [ \"$verdict\" = \"pass\" ] && [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then\n  printf 'confirmed_pass'\nelse\n  printf 'unconfirmed_or_fail'\nfi"
+    tool_command="#!/bin/sh\nset -e\nverdict=$(python3 -c \"import json;d=json.load(open('${execution_root}/.resolve/review/verdict.json'));print(d.get('verdict','fail'))\" 2>/dev/null || echo fail)\nsha=$(python3 -c \"import json;d=json.load(open('${execution_root}/.resolve/review/verdict.json'));print(d.get('commit_sha',''))\" 2>/dev/null || echo '')\nif [ \"$verdict\" = \"pass\" ] && [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then\n  printf 'confirmed_pass'\nelse\n  printf 'unconfirmed_or_fail'\nfi"
   ];
 
   // --- Bound: five fixes, six reviews. Round counter is a decision point,
@@ -186,7 +186,7 @@ digraph build_like_ken {
   ResumeFix [
     shape=box, goal_gate=true, fidelity="full",
     label="Resume Original Implementer (rounds 1-3)",
-    prompt="Resume session ${implementer_session_id}. Fix only the LOAD-BEARING findings in this review, using this precomputed packet instead of re-running git discovery.\n\nREVIEW FINDINGS:\n${review_findings}\n\nREVIEW PACKAGE:\n${review_package}\n\nRerun the task's exact verification, commit, and update .resolve/build/impl_${task_id}.json with the new commit_sha. Print the single line: fix_done"
+    prompt="Resume session ${implementer_session_id}. Fix only the LOAD-BEARING findings in this review, using this precomputed packet instead of re-running git discovery.\n\nREVIEW FINDINGS:\n${review_findings}\n\nREVIEW PACKAGE:\n${review_package}\n\nRerun the task's exact verification, commit, and update ${execution_root}/.resolve/build/impl_${task_id}.json with the new commit_sha. Print the single line: fix_done"
   ];
 
   // Rounds 4-5: fresh, stronger implementer -- the original session's budget
@@ -194,19 +194,19 @@ digraph build_like_ken {
   EscalateFix [
     shape=box, goal_gate=true, fidelity="full",
     label="Fresh Escalated Implementer (rounds 4-5)",
-    prompt="FRESH ESCALATED REVIEW FIX\n\nTASK GOAL: ${task_goal}\n\nREVIEW PACKAGE:\n${review_package}\n\nOPEN FINDINGS:\n${review_findings}\n\nFix only the open LOAD-BEARING findings -- no scope expansion. Run static analysis and the exact VDD verification, commit once, and update .resolve/build/impl_${task_id}.json with the new commit_sha. Print the single line: fix_done"
+    prompt="FRESH ESCALATED REVIEW FIX\n\nTASK GOAL: ${task_goal}\n\nREVIEW PACKAGE:\n${review_package}\n\nOPEN FINDINGS:\n${review_findings}\n\nFix only the open LOAD-BEARING findings -- no scope expansion. Run static analysis and the exact VDD verification, commit once, and update ${execution_root}/.resolve/build/impl_${task_id}.json with the new commit_sha. Print the single line: fix_done"
   ];
 
   // Round 6: adjudication only. Never a seventh fix.
   Adjudicate [
     shape=box, goal_gate=true, fidelity="full",
     label="Cap Adjudication (round 6, no further fix)",
-    prompt="Read the final review verdict at .resolve/review/verdict.json. If no LOAD-BEARING finding remains, write .resolve/build/adjudication.json with {\"outcome\":\"approved_with_parked\",\"parked\":[{\"detail\":\"...\",\"reason\":\"non-load-bearing after bounded review\"}]}. If any LOAD-BEARING finding remains, write {\"outcome\":\"blocked\",\"blocker\":\"...\"}. There is no further fix attempt regardless of outcome. Print the single line: adjudicated"
+    prompt="Read the final review verdict at ${execution_root}/.resolve/review/verdict.json. If no LOAD-BEARING finding remains, write ${execution_root}/.resolve/build/adjudication.json with {\"outcome\":\"approved_with_parked\",\"parked\":[{\"detail\":\"...\",\"reason\":\"non-load-bearing after bounded review\"}]}. If any LOAD-BEARING finding remains, write {\"outcome\":\"blocked\",\"blocker\":\"...\"}. There is no further fix attempt regardless of outcome. Print the single line: adjudicated"
   ];
 
   AdjudicationGate [
     shape=parallelogram, label="Adjudication Outcome",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('.resolve/build/adjudication.json'))['outcome'])\""
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('${execution_root}/.resolve/build/adjudication.json'))['outcome'])\""
   ];
 
   // --- Ledger write happens ONLY after ConfirmVerdictAgainstRepo or a clean
@@ -219,7 +219,7 @@ digraph build_like_ken {
   Blocked [
     shape=box, goal_gate=true, fidelity="summary:high",
     label="Report Blocked Task",
-    prompt="Task ${task_id} is BLOCKED after the bounded remediation loop. State the exact blocker from .resolve/build/adjudication.json. Do not write a ledger completion entry. Print the single line: blocked_reported"
+    prompt="Task ${task_id} is BLOCKED after the bounded remediation loop. State the exact blocker from ${execution_root}/.resolve/build/adjudication.json. Do not write a ledger completion entry. Print the single line: blocked_reported"
   ];
 
   Report [
