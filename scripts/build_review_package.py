@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Build the review packet for build_like_ken.dot's BuildReviewPackage node.
 
-Contract (called as: python3 scripts/build_review_package.py --task "$TASK_ID"
---state-dir "$STATE_DIR" --round "$ROUND")
+Contract (called as: python3 scripts/build_review_package.py --task "${task_id}"
+--state-dir "${state_dir}" --round "${round}")
 ------------------------------------------------------------------------------
+${task_id} / ${state_dir} are tool_command substitution tokens resolved from context (set by
+NextTask's parse_json="true" JSON object); ${round} is set the same way by CheckRound's own
+parse_json="true" output -- none of these are uppercase environment variables.
 Ports recipes/single-task-pipeline.yaml's "build-review-package" step directly
 (the exact diff/log/stat assembly, including the double-interpolation fix already
 applied there): base SHA read from the durable per-task base-sha file, HEAD SHA

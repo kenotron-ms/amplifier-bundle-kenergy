@@ -56,22 +56,22 @@ digraph debug {
   // Phase 1: Reproduce and Investigate.
   ReproduceAndInvestigate [
     shape=box, goal_gate=true, fidelity="full",
-    label="Reproduce and Investigate (Phase 1)",
-    prompt="Bug: ${bug_description}\n\nRead error messages and stack traces COMPLETELY -- note line numbers, file paths, error codes. Reproduce consistently: can you trigger it reliably, what are the exact steps? If not reproducible, gather more data -- do not guess. Check recent changes (git diff, git log --oneline -10). In multi-component systems, log what enters/exits each boundary and run once to see WHERE it breaks before analyzing. Trace data flow backward from the error to its source -- fix at source, not symptom.\n\nWrite .resolve/debug/reproduction.json with {\"repro_steps\":\"...\",\"reproducible\":true|false,\"evidence\":\"...\"}. Print the single line: investigated"
+    label="Reproduce & Investigate (Phase 1)",
+    prompt="Bug: ${bug_description}\n\nRead error messages and stack traces COMPLETELY -- note line numbers, file paths, error codes. Reproduce consistently: can you trigger it reliably, what are the exact steps? If not reproducible, gather more data -- do not guess. Check recent changes (git diff, git log --oneline -10). In multi-component systems, log what enters/exits each boundary and run once to see WHERE it breaks before analyzing. Trace data flow backward from the error to its source -- fix at source, not symptom.\n\nWrite .resolve/debug/reproduction.json with {\"repro_steps\":\"...\",\"reproducible\":true|false,\"evidence\":\"...\"}. Call the report_outcome tool with status=\"success\" and preferred_label=\"investigated\" (also print the single line: investigated)"
   ];
 
   // Phase 2: Pattern Analysis.
   PatternAnalysis [
     shape=box, goal_gate=true, fidelity="full",
     label="Pattern Analysis (Phase 2)",
-    prompt="Locate similar working code in the same codebase. If implementing/comparing against a reference pattern, read it completely -- don't skim. Identify every difference between working and broken, however small. Understand what dependencies, config, and assumptions the broken code needs.\n\nWrite .resolve/debug/pattern_analysis.json with {\"working_example\":\"...\",\"differences\":[...]}. Print the single line: pattern_analyzed"
+    prompt="Locate similar working code in the same codebase. If implementing/comparing against a reference pattern, read it completely -- don't skim. Identify every difference between working and broken, however small. Understand what dependencies, config, and assumptions the broken code needs.\n\nWrite .resolve/debug/pattern_analysis.json with {\"working_example\":\"...\",\"differences\":[...]}. Call the report_outcome tool with status=\"success\" and preferred_label=\"pattern_analyzed\" (also print the single line: pattern_analyzed)"
   ];
 
   // Phase 3: Hypothesis and Test -- scientific method, one variable at a time.
   FormAndTestHypothesis [
     shape=box, goal_gate=true, fidelity="full",
-    label="Form and Test Hypothesis (Phase 3)",
-    prompt="State clearly: 'I think X is the root cause because Y.' Design the SMALLEST test that would confirm or deny this -- one variable at a time. Run it and gather real evidence. Write .resolve/debug/hypothesis.json with {\"hypothesis\":\"...\",\"test\":\"...\",\"confirmed\":true|false,\"evidence\":\"...\"}. If you don't understand something, say so explicitly -- don't pretend to know. Print the single line: hypothesis_tested"
+    label="Form & Test Hypothesis (Phase 3)",
+    prompt="State clearly: 'I think X is the root cause because Y.' Design the SMALLEST test that would confirm or deny this -- one variable at a time. Run it and gather real evidence. Write .resolve/debug/hypothesis.json with {\"hypothesis\":\"...\",\"test\":\"...\",\"confirmed\":true|false,\"evidence\":\"...\"}. If you don't understand something, say so explicitly -- don't pretend to know. Call the report_outcome tool with status=\"success\" and preferred_label=\"hypothesis_tested\" (also print the single line: hypothesis_tested)"
   ];
 
   HypothesisGate [
@@ -83,7 +83,7 @@ digraph debug {
   DelegateFix [
     shape=box, goal_gate=true, fidelity="full",
     label="Delegate the Fix (Phase 4)",
-    prompt="Root cause confirmed: $(cat .resolve/debug/hypothesis.json). Delegate to foundation:bug-hunter or kenergy:implementer: reproduce the bug first to confirm it still exists, apply the minimal fix, verify with real execution that the bug is gone, commit. Write .resolve/debug/fix_attempt.json with {\"commit_sha\":\"...\",\"attempt_number\":<int>}. Print the single line: fix_delegated"
+    prompt="Root cause confirmed: $(cat .resolve/debug/hypothesis.json). Delegate to foundation:bug-hunter or kenergy:implementer: reproduce the bug first to confirm it still exists, apply the minimal fix, verify with real execution that the bug is gone, commit. Write .resolve/debug/fix_attempt.json with {\"commit_sha\":\"...\",\"attempt_number\":<int>}. Call the report_outcome tool with status=\"success\" and preferred_label=\"fix_delegated\" (also print the single line: fix_delegated)"
   ];
 
   // THE GATE. Never trust the fix delegation's own claim -- re-run the
@@ -103,14 +103,14 @@ digraph debug {
 
   ArchitectureEscalation [
     shape=hexagon, mode="freeform",
-    label="Question the Architecture (3+ failed fixes)",
+    label="Question Architecture (3+ fails)",
     prompt="This bug has resisted 3 fix attempts. That is an architectural signal, not bad luck. Is this pattern fundamentally sound, or should we refactor the architecture instead of continuing to patch symptoms? What would you like to do?"
   ];
 
   Report [
     shape=box, goal_gate=true, fidelity="summary:high",
     label="Report",
-    prompt="Bug fixed and independently verified. Root cause: $(cat .resolve/debug/hypothesis.json). Fix commit: $(cat .resolve/debug/fix_attempt.json). Print the single line: reported"
+    prompt="Bug fixed and independently verified. Root cause: $(cat .resolve/debug/hypothesis.json). Fix commit: $(cat .resolve/debug/fix_attempt.json). Call the report_outcome tool with status=\"success\" and preferred_label=\"reported\" (also print the single line: reported)"
   ];
 
   Start                    -> ReproduceAndInvestigate;

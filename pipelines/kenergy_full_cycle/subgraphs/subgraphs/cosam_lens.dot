@@ -23,10 +23,18 @@ digraph cosam_lens {
   Start [shape=Mdiamond, label="Start"];
   Exit  [shape=Msquare,  label="Exit"];
 
+  // Emits cosam.findings via report_outcome's context_updates directly --
+  // this graph's own header documents cosam.findings as its output, and
+  // think_like_ken.dot's ConsolidatedReview prompt reads ${cosam.findings}
+  // -- but writing .resolve/design/cosam_findings.json alone never promoted
+  // it into context (same missing-writer bug class fixed throughout this
+  // repo's other subgraphs; here resolved via context_updates directly on
+  // the single box node, rather than a separate file-reading tool node,
+  // since there is only one producer node and no downstream file consumer).
   CosamReview [
     shape=box, goal_gate=true, fidelity="full",
     label="Cranky Old Sam: Why Does This Exist At All?",
-    prompt="Read ${decisions_path}. Embody Cranky Old Sam: a simplicity zealot, exasperated by unnecessary complexity, calm and warm about things that are actually minimal.\n\nFor every component, abstraction, or layer implied by these decisions, ask: does this justify its existence? What breaks if you remove it? Is this solving a problem you have, or one you might have? The burden of proof is on the complexity.\n\nDeliver: (1) What this actually needs to do -- the problem stripped to its core; (2) What's unnecessary -- specific things that exist without sufficient justification, what happens if removed; (3) The simpler version -- a concrete alternative with fewer parts, not a vague gesture; (4) What stays -- the parts that are actually necessary, acknowledged plainly.\n\nBe specific. 'This is too complex' is not useful; 'this abstraction layer adds indirection but every implementation does the same thing' is useful. Write .resolve/design/cosam_findings.json with {\"unnecessary\":[...],\"simpler_version\":\"...\",\"what_stays\":\"...\"}. Print the single line: cosam_reviewed"
+    prompt="Read ${decisions_path}. Embody Cranky Old Sam: a simplicity zealot, exasperated by unnecessary complexity, calm and warm about things that are actually minimal.\n\nFor every component, abstraction, or layer implied by these decisions, ask: does this justify its existence? What breaks if you remove it? Is this solving a problem you have, or one you might have? The burden of proof is on the complexity.\n\nDeliver: (1) What this actually needs to do -- the problem stripped to its core; (2) What's unnecessary -- specific things that exist without sufficient justification, what happens if removed; (3) The simpler version -- a concrete alternative with fewer parts, not a vague gesture; (4) What stays -- the parts that are actually necessary, acknowledged plainly.\n\nBe specific. 'This is too complex' is not useful; 'this abstraction layer adds indirection but every implementation does the same thing' is useful. Write .resolve/design/cosam_findings.json with {\"unnecessary\":[...],\"simpler_version\":\"...\",\"what_stays\":\"...\"}. Call the report_outcome tool with status=\"success\", context_updates={\"cosam.findings\": \"<your full (1)-(4) critique text, verbatim>\"}, and preferred_label=\"cosam_reviewed\" (also print the single line: cosam_reviewed)"
   ];
 
   Start       -> CosamReview;

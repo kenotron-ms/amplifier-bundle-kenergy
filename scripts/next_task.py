@@ -29,26 +29,30 @@ recipe path, where plan-writer's own agent output supplies task_id directly).
 
 Output contract
 ---------------
-On success (a task remains): prints "KEY=value" lines for every field the downstream nodes
-need (matching this repo's $VAR / ${var} convention -- uppercase env keys map 1:1 to the
-lowercase context vars referenced in build_like_ken.dot's prompts), then a final line with
-the routing token the NextTask edges match on:
+This node is invoked with parse_json="true" on build_like_ken.dot's NextTask node: the
+engine requires the ENTIRE stdout to be exactly one JSON object (handlers/tool.py's
+parse_json path does a bare json.loads(stdout_text) -- it is not KEY=value-line-aware, and
+the engine has no other mechanism for a tool_command to inject multiple context keys at
+once). Earlier revisions of this script printed shell-style "KEY=value" lines on the
+(incorrect) assumption the engine would parse them into context; it does not -- those keys
+were silently never set, and every downstream node reading $TASK_ID/$STATE_DIR/etc. saw an
+empty/undefined value. Fixed by switching to a single JSON object whose flat (non-dotted)
+keys parse_json injects directly into context, exactly matching the plain $task_id/$state_dir
+tokens build_like_ken.dot's prompts and tool_commands already reference:
 
-  TASK_ID=task-3
-  TASK_GOAL=...
-  TASK_DESCRIPTION=...
-  TASK_SPEC=...
-  TASK_ACCEPTANCE=...
-  TASK_INTERFACES=...
-  TASK_FILES=...
-  TASK_IMPLEMENTATION_MODEL_ROLE=coding
-  TASK_REVIEW_MODEL_ROLE=critique
-  TASK_ESCALATED_MODEL_ROLE=reasoning
-  STATE_DIR=/abs/path/.kenergy/sdd/<plan-slug>
-  has_task
+  {"route": "has_task", "task_id": "task-3", "task_goal": "...", "task_description": "...",
+   "task_spec": "...", "task_acceptance": "...", "task_interfaces": "...", "task_files": "...",
+   "task_implementation_model_role": "coding", "task_review_model_role": "critique",
+   "task_escalated_model_role": "reasoning", "state_dir": "/abs/path/.kenergy/sdd/<plan-slug>"}
+
+Downstream edges route on this object's "route" field via
+condition="context.route=has_task" / condition="context.route=no_tasks" -- NOT
+context.tool.last_line (parse_json's dict keys land directly in context; there is no
+separate routing-token last line to key off, since the whole stdout must be the one JSON
+document parse_json parses).
 
 When the plan is exhausted (every task has a safe, ancestor-confirmed ledger entry), prints
-exactly one line: "no_tasks".
+exactly: {"route": "no_tasks"}.
 
 Fail-closed: a missing plan file, a plan with zero parsed tasks, or a ledger identity mismatch
 is a hard error (non-zero exit, message on stderr) -- never silently treated as "no_tasks".
@@ -57,6 +61,7 @@ is a hard error (non-zero exit, message on stderr) -- never silently treated as 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -201,21 +206,29 @@ def main() -> None:
                 f"{task['task_id']} is missing required field(s): {', '.join(missing)}"
             )
 
-        print(f"TASK_ID={task['task_id']}")
-        print(f"TASK_GOAL={flatten(task['goal'])}")
-        print(f"TASK_DESCRIPTION={flatten(task['description'])}")
-        print(f"TASK_SPEC={flatten(task['spec'])}")
-        print(f"TASK_ACCEPTANCE={flatten(task['acceptance'])}")
-        print(f"TASK_INTERFACES={flatten(task['interfaces'])}")
-        print(f"TASK_FILES={flatten(task['files'])}")
-        print(f"TASK_IMPLEMENTATION_MODEL_ROLE={task['implementation_model_role']}")
-        print(f"TASK_REVIEW_MODEL_ROLE={task['review_model_role']}")
-        print(f"TASK_ESCALATED_MODEL_ROLE={task['escalated_model_role']}")
-        print(f"STATE_DIR={state_dir}")
-        print("has_task")
+        print(
+            json.dumps(
+                {
+                    "route": "has_task",
+                    "task_id": task["task_id"],
+                    "task_goal": flatten(task["goal"]),
+                    "task_description": flatten(task["description"]),
+                    "task_spec": flatten(task["spec"]),
+                    "task_acceptance": flatten(task["acceptance"]),
+                    "task_interfaces": flatten(task["interfaces"]),
+                    "task_files": flatten(task["files"]),
+                    "task_implementation_model_role": task[
+                        "implementation_model_role"
+                    ],
+                    "task_review_model_role": task["review_model_role"],
+                    "task_escalated_model_role": task["escalated_model_role"],
+                    "state_dir": str(state_dir),
+                }
+            )
+        )
         return
 
-    print("no_tasks")
+    print(json.dumps({"route": "no_tasks"}))
 
 
 if __name__ == "__main__":

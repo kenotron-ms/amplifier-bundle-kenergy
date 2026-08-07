@@ -72,38 +72,84 @@ digraph kenergy_full_cycle {
   Start [shape=Mdiamond, label="Start"];
   Exit  [shape=Msquare,  label="Exit"];
 
+  // `inputs=` is not a real engine attribute anywhere in this file (see
+  // build_like_ken.dot's DefineTaskCriteria note for the full explanation) --
+  // it was silently a no-op everywhere it appeared. ThinkLikeKen needs no
+  // replacement: $topic is this graph's own top-level param and already
+  // flows into the child via the automatic context clone (same flat name on
+  // both sides), so no injection was ever needed for it.
   ThinkLikeKen [
     shape=folder, label="/think-like-ken",
     dot_file="subgraphs/think_like_ken.dot",
-    inputs="topic=$topic",
     outputs="design.design_doc"
+  ];
+
+  // PlanLikeKen's child graph reads $design_doc (a flat key), but the only
+  // value available in THIS parent's context is the dotted design.design_doc
+  // ThinkLikeKen's own outputs= merge produced. A rename is genuinely needed
+  // here (not just automatic clone-through, since the names differ) --
+  // but `context.<key>` folder attrs are never substituted by the engine
+  // (only tool_command/prompt/description/tool_env are), so a literal
+  // context.design_doc="context.design.design_doc" would inject that literal
+  // STRING, not the design doc path. A deterministic tool node bridges the
+  // rename via parse_json="true" instead.
+  RenameDesignDocForPlan [
+    shape=parallelogram, label="Bridge design.design_doc -> design_doc", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.dumps({'design_doc': '${design.design_doc}'}))\""
   ];
 
   PlanLikeKen [
     shape=folder, label="/plan-like-ken",
     dot_file="subgraphs/plan_like_ken.dot",
-    inputs="design_doc=context.design.design_doc",
     outputs="plan.plan_doc"
+  ];
+
+  // Same rename need as RenameDesignDocForPlan above: BuildLikeKen's child
+  // graph reads $plan_path, but this parent only has the dotted
+  // plan.plan_doc PlanLikeKen's own outputs= merge produced.
+  // $execution_root itself needs no bridge -- it is this graph's own
+  // top-level param and already flows through via clone (same flat name).
+  RenamePlanDocForBuild [
+    shape=parallelogram, label="Bridge plan.plan_doc -> plan_path", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.dumps({'plan_path': '${plan.plan_doc}'}))\""
   ];
 
   BuildLikeKen [
     shape=folder, label="/build-like-ken",
     dot_file="subgraphs/build_like_ken.dot",
-    inputs="plan_path=context.plan.plan_doc,execution_root=$execution_root",
     outputs="build.verdict,build.tasks_completed,build.blocked_task_id"
   ];
 
   // THE GATE for build_like_ken's return -- never assume "the folder node
   // finished" means all tasks landed.
+  // ${context.build.verdict} was a broken substitution token: the ${...}
+  // substitution engine does a literal snapshot lookup on whatever key is
+  // inside the braces, and BuildLikeKen's outputs= merge (handlers/pipeline.py
+  // step 11b2) copies the child's plain "build.verdict" key into this
+  // parent's context AS "build.verdict" -- never as "context.build.verdict".
+  // The old token therefore always resolved to the literal, unexpanded
+  // string "${context.build.verdict}", so this gate's condition edges never
+  // matched anything real (both would have silently no-matched and hit
+  // the engine's fail-loud no_matching_edge error at the main-loop level).
   CheckBuildVerdict [
-    shape=parallelogram, label="Check build.verdict (not just that the node returned)",
-    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"${context.build.verdict}\""
+    shape=parallelogram, label="Check build.verdict",
+    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"${build.verdict}\""
+  ];
+
+  // Same rename need as the design_doc/plan_path bridges above -- debug.dot's
+  // child graph reads $bug_description, but this parent only has the dotted
+  // build.blocked_task_id (set by ComputeBuildVerdictBlocked, only on the
+  // CheckBuildVerdict->Debug path -- it is UNSET on the CheckVerifyVerdict->
+  // Debug path, so this bridge must handle both entries, not just the build
+  // one the old (also-broken) inputs= attribute assumed).
+  RenameBugDescriptionForDebug [
+    shape=parallelogram, label="Bridge -> bug_description", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nif [ -n \"${build.blocked_task_id}\" ]; then\n  python3 -c \"import json;print(json.dumps({'bug_description': 'Task ${build.blocked_task_id} blocked after bounded remediation -- see build ledger for the exact blocker.'}))\"\nelse\n  python3 -c \"import json;print(json.dumps({'bug_description': 'Verify reported NOT VERIFIED -- gap: ${verdict.gap}'}))\"\nfi"
   ];
 
   Debug [
     shape=folder, label="/debug (shared recovery)",
     dot_file="subgraphs/debug.dot",
-    inputs="bug_description=context.build.blocked_task_id",
     outputs="debug.root_cause,debug.fix_commit_sha"
   ];
 
@@ -121,7 +167,7 @@ digraph kenergy_full_cycle {
   // step." Default is to run it; explicit human choice can skip.
   RecommendVerify [
     shape=hexagon, mode="multiple_choice", options="run_verify,skip_to_finish",
-    label="Run /verify? (recommended, skippable)",
+    label="Run /verify?",
     prompt="All tasks accepted (${build.tasks_completed} completed). /verify gathers fresh, independently-interpreted completion evidence before /finish -- recommended for anything non-trivial. Run it, or skip straight to /finish?"
   ];
 
@@ -132,9 +178,10 @@ digraph kenergy_full_cycle {
   ];
 
   // THE GATE for verify's return.
+  // Same broken-substitution-token fix as CheckBuildVerdict above.
   CheckVerifyVerdict [
     shape=parallelogram, label="Check verify.verdict",
-    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"${context.verify.verdict}\""
+    tool_command="#!/bin/sh\nset -e\nprintf '%s' \"${verify.verdict}\""
   ];
 
   Finish [
@@ -146,20 +193,28 @@ digraph kenergy_full_cycle {
   Report [
     shape=box, goal_gate=true, fidelity="summary:high",
     label="Report Full Cycle",
-    prompt="Summarize the complete cycle: design (${design.design_doc}), plan (${plan.plan_doc}), build (${build.tasks_completed} tasks, verdict ${build.verdict}), verify (${verify.verdict}, if run), finish (${finish.action}). Print the single line: cycle_reported"
+    prompt="Summarize the complete cycle: design (${design.design_doc}), plan (${plan.plan_doc}), build (${build.tasks_completed} tasks, verdict ${build.verdict}), verify (${verify.verdict}, if run), finish (${finish.action}). Call the report_outcome tool with status=\"success\" and preferred_label=\"cycle_reported\" (also print the single line: cycle_reported)"
   ];
 
   Start                -> ThinkLikeKen;
-  ThinkLikeKen          -> PlanLikeKen;
-  PlanLikeKen           -> BuildLikeKen;
+  ThinkLikeKen          -> RenameDesignDocForPlan;
+  RenameDesignDocForPlan -> PlanLikeKen;
+  PlanLikeKen           -> RenamePlanDocForBuild;
+  RenamePlanDocForBuild -> BuildLikeKen;
   BuildLikeKen          -> CheckBuildVerdict;
 
   CheckBuildVerdict     -> RecommendVerify [condition="context.build.verdict=all_tasks_complete", weight="2"];
-  CheckBuildVerdict     -> Debug           [condition="context.build.verdict=blocked"];
+  CheckBuildVerdict     -> RenameBugDescriptionForDebug [condition="context.build.verdict=blocked"];
+  RenameBugDescriptionForDebug -> Debug;
 
+  // Routed back through the same rename bridges as the forward path (not
+  // directly to BuildLikeKen/PlanLikeKen) -- ${plan.plan_doc}/
+  // ${design.design_doc} are still the only names these dotted values exist
+  // under in context; a direct loop-back edge would skip the bridge and
+  // leave $plan_path/$design_doc stale or empty on the resumed run.
   Debug                 -> ResumeRoute;
-  ResumeRoute           -> BuildLikeKen    [condition="context.tool.last_line=continue_build", loop_restart="true", weight="2"];
-  ResumeRoute           -> PlanLikeKen     [condition="context.tool.last_line=replan", loop_restart="true"];
+  ResumeRoute           -> RenamePlanDocForBuild [condition="context.tool.last_line=continue_build", loop_restart="true", weight="2"];
+  ResumeRoute           -> RenameDesignDocForPlan [condition="context.tool.last_line=replan", loop_restart="true"];
   ResumeRoute           -> ThinkLikeKen    [condition="context.tool.last_line=redesign", loop_restart="true"];
 
   RecommendVerify       -> Verify          [condition="context.tool.last_line=run_verify", weight="2"];
@@ -167,7 +222,7 @@ digraph kenergy_full_cycle {
 
   Verify                -> CheckVerifyVerdict;
   CheckVerifyVerdict    -> Finish          [condition="context.verify.verdict=verified", weight="2"];
-  CheckVerifyVerdict    -> Debug           [condition="context.verify.verdict=not_verified"];
+  CheckVerifyVerdict    -> RenameBugDescriptionForDebug [condition="context.verify.verdict=not_verified"];
 
   Finish                -> Report;
   Report                 -> Exit;

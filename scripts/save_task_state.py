@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Persist the task brief and base SHA for build_like_ken.dot's SaveTaskState node.
 
-Contract (called as: python3 scripts/save_task_state.py --task "$TASK_ID" --state-dir "$STATE_DIR")
+Contract (called as:
+  python3 scripts/save_task_state.py --task "${task_id}" --state-dir "${state_dir}" \
+    --goal "${task_goal}" --description "${task_description}" --spec "${task_spec}" \
+    --acceptance "${task_acceptance}" --interfaces "${task_interfaces}" --files "${task_files}"
+)
 -----------------------------------------------------------------------------------------------------
 Ports recipes/single-task-pipeline.yaml's "prepare-task-state" step: write a durable task
 brief and capture the base SHA once (never overwrite an existing base SHA -- it anchors every
@@ -13,10 +17,13 @@ message on stderr on failure (fail-closed), and persist state at the paths save_
 computes so downstream tool_commands (build_review_package.py, write_ledger.py) can find it
 by task id alone.
 
-Reads task field values from the same uppercase env vars next_task.py just emitted into
-context (TASK_GOAL, TASK_DESCRIPTION, TASK_SPEC, TASK_ACCEPTANCE, TASK_INTERFACES, TASK_FILES)
--- matching this repo's convention that a node's printed KEY=value lines become context vars
-available to every later tool_command in the same run.
+Task field values arrive as ${task_...} tool_command substitution tokens (populated in
+context by NextTask's parse_json="true" JSON object) -- NOT as uppercase environment
+variables. An earlier revision of this script read os.environ.get("TASK_GOAL", ...) etc. on
+the assumption the engine exports context keys as env vars automatically; it does not (see
+next_task.py's contract note) -- those environment reads always silently returned "". Fixed
+by taking every field as an explicit CLI flag, substituted directly into tool_command by the
+engine's ${key} substitution before this script ever runs.
 
 State layout (mirrors recipes/single-task-pipeline.yaml's task-briefs/ + .base-sha convention):
   $STATE_DIR/task-briefs/<slug>.md          -- the task brief
@@ -26,7 +33,6 @@ State layout (mirrors recipes/single-task-pipeline.yaml's task-briefs/ + .base-s
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import subprocess
 import sys
@@ -49,6 +55,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
     parser.add_argument("--state-dir", required=True)
+    parser.add_argument("--goal", default="")
+    parser.add_argument("--description", default="")
+    parser.add_argument("--spec", default="")
+    parser.add_argument("--acceptance", default="")
+    parser.add_argument("--interfaces", default="")
+    parser.add_argument("--files", default="")
     args = parser.parse_args()
 
     task_id = args.task.strip()
@@ -65,12 +77,12 @@ def main() -> None:
 
     brief = (
         f"# Task Brief: {task_id}\n\n"
-        f"## Goal\n{os.environ.get('TASK_GOAL', '')}\n\n"
-        f"## Description\n{os.environ.get('TASK_DESCRIPTION', '')}\n\n"
-        f"## Specification\n{os.environ.get('TASK_SPEC', '')}\n\n"
-        f"## Acceptance Criteria\n{os.environ.get('TASK_ACCEPTANCE', '')}\n\n"
-        f"## Interfaces\n{os.environ.get('TASK_INTERFACES', '')}\n\n"
-        f"## Files\n{os.environ.get('TASK_FILES', '')}\n"
+        f"## Goal\n{args.goal}\n\n"
+        f"## Description\n{args.description}\n\n"
+        f"## Specification\n{args.spec}\n\n"
+        f"## Acceptance Criteria\n{args.acceptance}\n\n"
+        f"## Interfaces\n{args.interfaces}\n\n"
+        f"## Files\n{args.files}\n"
     )
     brief_path.write_text(brief, encoding="utf-8")
 

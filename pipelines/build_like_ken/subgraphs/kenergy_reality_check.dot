@@ -40,21 +40,47 @@ digraph kenergy_reality_check {
   // Criteria") and its Output Structure.
   DefineCriteria [
     shape=box, goal_gate=true, fidelity="summary:high",
-    label="Define Verification Criteria (pre-work)",
-    prompt="Task: ${task_description}\n\nBefore this task is dispatched, define what \"working\" actually means -- not in terms of code written, but in terms of what a real user would observe or be able to do. \"It runs\" is not a criterion; \"a real user can do X and see Y\" is.\n\nProduce:\n- Working definition: one sentence, what a real user would observe when this is actually done.\n- Minimum proof required: the smallest demonstration that confirms the core need is met -- name the mechanism (static analysis / script execution / curl / browser / DTU).\n- What failure looks like: the specific observable sign the work has drifted.\n\nIf the verification path is genuinely uncertain, say so explicitly rather than guessing a level.\n\nWrite .resolve/build/criteria_${task_id}.json with {\"working_definition\":\"...\",\"minimum_proof\":\"...\",\"verification_level\":\"static\"|\"script\"|\"http\"|\"browser\"|\"dtu\",\"failure_looks_like\":\"...\"}. Print the single line: criteria_defined"
+    label="Define Verification Criteria",
+    prompt="Task: ${task_description}\n\nBefore this task is dispatched, define what \"working\" actually means -- not in terms of code written, but in terms of what a real user would observe or be able to do. \"It runs\" is not a criterion; \"a real user can do X and see Y\" is.\n\nProduce:\n- Working definition: one sentence, what a real user would observe when this is actually done.\n- Minimum proof required: the smallest demonstration that confirms the core need is met -- name the mechanism (static analysis / script execution / curl / browser / DTU).\n- What failure looks like: the specific observable sign the work has drifted.\n\nIf the verification path is genuinely uncertain, say so explicitly rather than guessing a level.\n\nWrite .resolve/build/criteria_${task_id}.json with {\"working_definition\":\"...\",\"minimum_proof\":\"...\",\"verification_level\":\"static\"|\"script\"|\"http\"|\"browser\"|\"dtu\",\"failure_looks_like\":\"...\"}. Call the report_outcome tool with status=\"success\" and preferred_label=\"criteria_defined\" (also print the single line: criteria_defined)"
+  ];
+
+  // Deterministic reader closing a missing-writer gap: this graph's own
+  // header documents criteria.working_definition / criteria.minimum_proof /
+  // criteria.verification_level as pre-work outputs, and build_like_ken.dot's
+  // Implement prompt reads ${criteria.minimum_proof} directly -- but
+  // DefineCriteria above only ever wrote a JSON FILE; nothing ever promoted
+  // those fields into context under the documented dotted keys (same
+  // missing-writer bug class fixed in build_like_ken.dot/verify.dot/
+  // finish.dot -- a box node writing a file is not the same as a context
+  // key existing for a sibling/parent node's ${...} substitution to read).
+  ReadCriteria [
+    shape=parallelogram, label="Promote Criteria to Context", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('.resolve/build/criteria_${task_id}.json'));print(json.dumps({'criteria.working_definition':d['working_definition'],'criteria.minimum_proof':d['minimum_proof'],'criteria.verification_level':d['verification_level']}))\""
   ];
 
   // Faithful to SKILL.md Core Behavior 2 ("Post-Work: Hold the Claim to the
   // Bar") -- binary call, no hedged middle ground.
   HoldClaimToBar [
     shape=box, goal_gate=true, fidelity="summary:high",
-    label="Proven or Asserted? (post-work)",
-    prompt="Claim: ${task_description}\nOffered evidence: ${claimed_evidence}\n\nAsk specifically: is there real evidence here, or is this an assertion? A passing unit test is not proof of working for a non-library, real-user-facing claim. \"Should work\" is not proof. \"I tested it manually\" without a captured command and output is not proof.\n\nCall it PROVEN only if the evidence is a live run, a browser verification, a real API call, or real data -- something reproducible right now, not a theory. Otherwise call it ASSERTED and name exactly what's missing and what would satisfy it (e.g. \"no browser verify\", \"no end-to-end run\").\n\nWrite .resolve/verify/reality_check.json with {\"verdict\":\"proven\"|\"asserted\",\"gap\":\"...\"}. Print the single line: reality_checked"
+    label="Proven or Asserted?",
+    prompt="Claim: ${task_description}\nOffered evidence: ${claimed_evidence}\n\nAsk specifically: is there real evidence here, or is this an assertion? A passing unit test is not proof of working for a non-library, real-user-facing claim. \"Should work\" is not proof. \"I tested it manually\" without a captured command and output is not proof.\n\nCall it PROVEN only if the evidence is a live run, a browser verification, a real API call, or real data -- something reproducible right now, not a theory. Otherwise call it ASSERTED and name exactly what's missing and what would satisfy it (e.g. \"no browser verify\", \"no end-to-end run\").\n\nWrite .resolve/verify/reality_check.json with {\"verdict\":\"proven\"|\"asserted\",\"gap\":\"...\"}. Call the report_outcome tool with status=\"success\" and preferred_label=\"reality_checked\" (also print the single line: reality_checked)"
+  ];
+
+  // Same missing-writer fix as ReadCriteria above, for this graph's
+  // post-work documented outputs verdict.proven_or_asserted / verdict.gap
+  // (verify.dot's OverallGate reads .resolve/verify/reality_check.json
+  // directly by file path so it is unaffected, but the documented dotted
+  // context keys were never actually set for any other consumer).
+  ReadVerdict [
+    shape=parallelogram, label="Promote Verdict to Context", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('.resolve/verify/reality_check.json'));print(json.dumps({'verdict.proven_or_asserted':d['verdict'],'verdict.gap':d.get('gap','')}))\""
   ];
 
   Start          -> RouteMode;
   RouteMode      -> DefineCriteria   [condition="context.tool.last_line=pre_work", weight="2"];
   RouteMode      -> HoldClaimToBar   [condition="context.tool.last_line=post_work"];
-  DefineCriteria -> Exit;
-  HoldClaimToBar -> Exit;
+  DefineCriteria -> ReadCriteria;
+  ReadCriteria   -> Exit;
+  HoldClaimToBar -> ReadVerdict;
+  ReadVerdict    -> Exit;
 }

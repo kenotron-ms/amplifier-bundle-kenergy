@@ -2,9 +2,14 @@
 """Ledger completion writer for build_like_ken.dot's WriteLedger node.
 
 Contract (called as:
-  python3 scripts/write_ledger.py --state-dir "$STATE_DIR" --task "$TASK_ID" --outcome "$OUTCOME"
+  python3 scripts/write_ledger.py --state-dir "${state_dir}" --task "${task_id}" --outcome "${outcome}"
   printf 'ledger_written'
 )
+${state_dir} / ${task_id} / ${outcome} are tool_command substitution tokens resolved from
+context (state_dir/task_id set by NextTask's parse_json="true" JSON object; outcome set by
+whichever upstream node -- ConfirmVerdictAgainstRepo's PASS path or Adjudicate's
+approved_with_parked path -- last wrote it into context) -- not uppercase environment
+variables.
 ------------------------------------------------------------------------------
 Ports recipes/single-task-pipeline.yaml's "write-ledger-checkpoint" step: append
 a safe completion entry ("- [x] <task> \u2014 <head-sha> \u2014 <outcome>") to the
