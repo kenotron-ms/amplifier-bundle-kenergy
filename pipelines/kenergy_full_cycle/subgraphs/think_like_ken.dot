@@ -60,7 +60,19 @@ digraph think_like_ken {
   UnderstandContext [
     shape=box, goal_gate=true, fidelity="summary:high",
     label="Understand Context (Phase 1)",
-    prompt="Topic: ${topic}\n\nBefore asking any question: check the current project state (files, docs, recent commits), read referenced documents or existing designs, gather relevant evidence, precedent, and research. State what you understand about the project context. Write .resolve/design/context.json with {\"summary\":\"...\",\"open_questions\":[...]} -- open_questions are candidate genuine user-only forks, not yet confirmed. Call the report_outcome tool with status=\"success\" and preferred_label=\"context_understood\" (also print the single line: context_understood)"
+    prompt="Topic: ${topic}\n\nBefore asking any question: check the current project state (files, docs, recent commits), read referenced documents or existing designs, gather relevant evidence, precedent, and research. State what you understand about the project context. Write .resolve/design/context.json with {\"summary\":\"...\",\"open_questions\":[...]} -- open_questions are candidate genuine user-only forks, not yet confirmed\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"context_understood\" (also print the single line: context_understood). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+  ];
+
+  // Deterministic gate (added per the goal_gate self-report audit): never
+  // trust "context_understood" report_outcome/text alone as proof
+  // UnderstandContext actually did the work -- confirmed live (the
+  // todoapp-attractor-pipeline run) that a model can call report_outcome
+  // zero times across 4/4 attempts while still producing plausible prose.
+  // This reads the FILE the prompt requires and checks it has the two
+  // required keys with real values, never the box node's own claim.
+  ContextArtifactGate [
+    shape=parallelogram, label="Context Artifact Written?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json,sys\ntry:\n  d=json.load(open('.resolve/design/context.json'))\n  ok = isinstance(d.get('summary'), str) and d['summary'].strip() != '' and isinstance(d.get('open_questions'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
   ];
 
   // Phase 2: Resolve Genuine User-Only Forks -- a real loop, gated on
@@ -72,7 +84,7 @@ digraph think_like_ken {
   IdentifyForks [
     shape=box, goal_gate=true, fidelity="summary:high",
     label="Identify Remaining Genuine Forks",
-    prompt="Given the context in .resolve/design/context.json and any prior answers in .resolve/design/fork_answers.json (if it exists), list only the OPEN decisions that are genuine personal-preference questions or facts only the user knows -- not engineering questions with a defensible answer. Batch them by topic; never split one topic into micro-decisions. Write .resolve/design/forks.json with {\"has_forks\":true|false,\"forks\":[{\"topic\":\"...\",\"question\":\"...\"}]}. Call the report_outcome tool with status=\"success\" and preferred_label=\"forks_identified\" (also print the single line: forks_identified)"
+    prompt="Given the context in .resolve/design/context.json and any prior answers in .resolve/design/fork_answers.json (if it exists), list only the OPEN decisions that are genuine personal-preference questions or facts only the user knows -- not engineering questions with a defensible answer. Batch them by topic; never split one topic into micro-decisions. Write .resolve/design/forks.json with {\"has_forks\":true|false,\"forks\":[{\"topic\":\"...\",\"question\":\"...\"}]}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"forks_identified\" (also print the single line: forks_identified). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
   ];
 
   ForkGate [
@@ -88,7 +100,7 @@ digraph think_like_ken {
 
   RecordForkAnswers [
     shape=parallelogram, label="Record Fork Answers",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/append_fork_answers.py --reply \"${last_response}\"\nprintf 'recorded'"
+    tool_command="#!/bin/sh\nset -e\npython3 ../../scripts/append_fork_answers.py --reply \"${last_response}\"\nprintf 'recorded'"
   ];
 
   // Phase 3: Synthesize Evidence-Backed Decisions, with an optional inline
@@ -98,7 +110,7 @@ digraph think_like_ken {
   SynthesizeDecisions [
     shape=box, goal_gate=true, fidelity="full",
     label="Synthesize Evidence-Backed Decisions (Phase 3)",
-    prompt="For every remaining engineering decision with a defensible answer, decide directly using evidence, precedent, research, and the project's constraints. Apply YAGNI ruthlessly -- no speculative features. Record each choice and brief reasoning. Write .resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}], \"needs_simplicity_lens\":true|false, \"needs_consequence_lens\":true|false}. Call the report_outcome tool with status=\"success\" and preferred_label=\"decisions_synthesized\" (also print the single line: decisions_synthesized)"
+    prompt="For every remaining engineering decision with a defensible answer, decide directly using evidence, precedent, research, and the project's constraints. Apply YAGNI ruthlessly -- no speculative features. Record each choice and brief reasoning. Write .resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}], \"needs_simplicity_lens\":true|false, \"needs_consequence_lens\":true|false}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"decisions_synthesized\" (also print the single line: decisions_synthesized). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
   ];
 
   DecisionRoute [
@@ -165,12 +177,21 @@ digraph think_like_ken {
     prompt="Delegate document creation to kenergy:design-writer. Include the complete approved consolidated review and all resolved fork answers. Instruct it to save to docs/plans/<date>-<topic>-design.md with: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Write .resolve/design/design_doc_path.txt with the saved path. Call the report_outcome tool with status=\"success\" and preferred_label=\"design_delegated\" (also print the single line: design_delegated)"
   ];
 
+  // Deterministic gate: DelegateDesignWriter's own report_outcome claim is
+  // not proof the design-writer subagent actually saved a file -- confirm
+  // the path it was supposed to write actually exists and the file it
+  // points at is non-empty before SelfReview reads it.
+  DesignDocArtifactGate [
+    shape=parallelogram, label="Design Doc Actually Saved?",
+    tool_command="#!/bin/sh\nset -e\npath=$(cat .resolve/design/design_doc_path.txt 2>/dev/null || true)\nif [ -n \"$path\" ] && [ -s \"$path\" ]; then printf 'ok'; else printf 'missing'; fi"
+  ];
+
   // Phase 6: Spec Self-Review -- 4-point checklist, then adversarial review,
   // capped at 3 cycles.
   SelfReview [
     shape=box, goal_gate=true, fidelity="full",
     label="Spec Self-Review (4-point checklist)",
-    prompt="Read the design document at $(cat .resolve/design/design_doc_path.txt). Check: (1) Placeholder scan -- no [TBD]/[TODO]/[FILL IN]/empty sections; (2) Internal consistency -- component names, data flows, interfaces align throughout; (3) Scope check -- every item traces to a user requirement, nothing extra snuck in; (4) Ambiguity check -- no vague terms like 'handle errors appropriately' without specifics. Write .resolve/design/self_review.json with {\"pass\":true|false,\"issues\":[...]}. Call the report_outcome tool with status=\"success\" and preferred_label=\"self_reviewed\" (also print the single line: self_reviewed)"
+    prompt="Read the design document at $(cat .resolve/design/design_doc_path.txt). Check: (1) Placeholder scan -- no [TBD]/[TODO]/[FILL IN]/empty sections; (2) Internal consistency -- component names, data flows, interfaces align throughout; (3) Scope check -- every item traces to a user requirement, nothing extra snuck in; (4) Ambiguity check -- no vague terms like 'handle errors appropriately' without specifics. Write .resolve/design/self_review.json with {\"pass\":true|false,\"issues\":[...]}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"self_reviewed\" (also print the single line: self_reviewed). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
   ];
 
   SelfReviewGate [
@@ -202,7 +223,9 @@ digraph think_like_ken {
   ];
 
   Start                       -> UnderstandContext;
-  UnderstandContext           -> IdentifyForks;
+  UnderstandContext           -> ContextArtifactGate;
+  ContextArtifactGate         -> IdentifyForks       [condition="context.tool.last_line=ok", weight="2"];
+  ContextArtifactGate         -> UnderstandContext    [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=3"];
   IdentifyForks               -> ForkGate;
   ForkGate                    -> ResolveForks         [condition="context.tool.last_line=has_forks"];
   ForkGate                    -> SynthesizeDecisions  [condition="context.tool.last_line=no_forks", weight="2"];
@@ -222,7 +245,9 @@ digraph think_like_ken {
   CheckConsolidatedApproval     -> ReviseSynthesis      [condition="context.tool.last_line=revise"];
   ReviseSynthesis               -> ConsolidatedReview   [loop_restart="true"];
 
-  DelegateDesignWriter           -> SelfReview;
+  DelegateDesignWriter            -> DesignDocArtifactGate;
+  DesignDocArtifactGate           -> SelfReview             [condition="context.tool.last_line=ok", weight="2"];
+  DesignDocArtifactGate           -> DelegateDesignWriter    [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- doc not actually saved, bounded by default_max_retry=3"];
   SelfReview                     -> SelfReviewGate;
   SelfReviewGate                 -> AdversarialReview   [condition="context.tool.last_line=pass", weight="2"];
   SelfReviewGate                 -> FixSelfReview        [condition="context.tool.last_line=fail"];

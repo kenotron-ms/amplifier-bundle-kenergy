@@ -67,7 +67,7 @@ digraph finish {
   // -- reject a caller-supplied branch_name that disagrees with reality.
   CaptureEntryPaths [
     shape=parallelogram, label="Capture Entry Paths",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/capture_entry_paths.py --worktree \"${WORKTREE_PATH:-$(pwd)}\""
+    tool_command="#!/bin/sh\nset -e\npython3 ../../scripts/capture_entry_paths.py --worktree \"${WORKTREE_PATH:-$(pwd)}\""
   ];
 
   // Human checkpoint 2 of 2. Exact-match-only per Task 5's fix -- no default

@@ -57,7 +57,18 @@ digraph debug {
   ReproduceAndInvestigate [
     shape=box, goal_gate=true, fidelity="full",
     label="Reproduce & Investigate (Phase 1)",
-    prompt="Bug: ${bug_description}\n\nRead error messages and stack traces COMPLETELY -- note line numbers, file paths, error codes. Reproduce consistently: can you trigger it reliably, what are the exact steps? If not reproducible, gather more data -- do not guess. Check recent changes (git diff, git log --oneline -10). In multi-component systems, log what enters/exits each boundary and run once to see WHERE it breaks before analyzing. Trace data flow backward from the error to its source -- fix at source, not symptom.\n\nWrite .resolve/debug/reproduction.json with {\"repro_steps\":\"...\",\"reproducible\":true|false,\"evidence\":\"...\"}. Call the report_outcome tool with status=\"success\" and preferred_label=\"investigated\" (also print the single line: investigated)"
+    prompt="Bug: ${bug_description}\n\nRead error messages and stack traces COMPLETELY -- note line numbers, file paths, error codes. Reproduce consistently: can you trigger it reliably, what are the exact steps? If not reproducible, gather more data -- do not guess. Check recent changes (git diff, git log --oneline -10). In multi-component systems, log what enters/exits each boundary and run once to see WHERE it breaks before analyzing. Trace data flow backward from the error to its source -- fix at source, not symptom.\n\nWrite .resolve/debug/reproduction.json with {\"repro_steps\":\"...\",\"reproducible\":true|false,\"evidence\":\"...\"}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"investigated\" (also print the single line: investigated). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+  ];
+
+  // Deterministic gate (added per the goal_gate self-report audit): confirm
+  // ReproduceAndInvestigate's report_outcome claim is backed by a real,
+  // well-formed reproduction.json before PatternAnalysis proceeds -- the
+  // same class of bug UnderstandContext hit live in think_like_ken.dot
+  // (model calls report_outcome / prints the line with no artifact behind
+  // it).
+  ReproductionArtifactGate [
+    shape=parallelogram, label="Reproduction Artifact Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('.resolve/debug/reproduction.json'))\n  ok = 'repro_steps' in d and isinstance(d.get('reproducible'), bool)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
   ];
 
   // Phase 2: Pattern Analysis.
@@ -65,6 +76,14 @@ digraph debug {
     shape=box, goal_gate=true, fidelity="full",
     label="Pattern Analysis (Phase 2)",
     prompt="Locate similar working code in the same codebase. If implementing/comparing against a reference pattern, read it completely -- don't skim. Identify every difference between working and broken, however small. Understand what dependencies, config, and assumptions the broken code needs.\n\nWrite .resolve/debug/pattern_analysis.json with {\"working_example\":\"...\",\"differences\":[...]}. Call the report_outcome tool with status=\"success\" and preferred_label=\"pattern_analyzed\" (also print the single line: pattern_analyzed)"
+  ];
+
+  // Deterministic gate: same pattern as ReproductionArtifactGate above --
+  // confirm pattern_analysis.json exists and is well-formed before trusting
+  // PatternAnalysis's own claim.
+  PatternAnalysisArtifactGate [
+    shape=parallelogram, label="Pattern Analysis Artifact Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('.resolve/debug/pattern_analysis.json'))\n  ok = 'working_example' in d and isinstance(d.get('differences'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
   ];
 
   // Phase 3: Hypothesis and Test -- scientific method, one variable at a time.
@@ -90,7 +109,7 @@ digraph debug {
   // ORIGINAL Phase 1 reproduction steps and read real output.
   VerifyFixIndependently [
     shape=parallelogram, label="Verify Fix Independently (re-run original repro)",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/rerun_repro.py --repro-file .resolve/debug/reproduction.json --at-commit \"$(python3 -c \\\"import json;print(json.load(open('.resolve/debug/fix_attempt.json'))['commit_sha'])\\\")\""
+    tool_command="#!/bin/sh\nset -e\npython3 ../../scripts/rerun_repro.py --repro-file .resolve/debug/reproduction.json --at-commit \"$(python3 -c \\\"import json;print(json.load(open('.resolve/debug/fix_attempt.json'))['commit_sha'])\\\")\""
   ];
 
   // Bounded escalation: 3+ failures = architectural problem, not a fourth
@@ -114,8 +133,12 @@ digraph debug {
   ];
 
   Start                    -> ReproduceAndInvestigate;
-  ReproduceAndInvestigate  -> PatternAnalysis;
-  PatternAnalysis          -> FormAndTestHypothesis;
+  ReproduceAndInvestigate  -> ReproductionArtifactGate;
+  ReproductionArtifactGate -> PatternAnalysis          [condition="context.tool.last_line=ok", weight="2"];
+  ReproductionArtifactGate -> ReproduceAndInvestigate  [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=2"];
+  PatternAnalysis          -> PatternAnalysisArtifactGate;
+  PatternAnalysisArtifactGate -> FormAndTestHypothesis     [condition="context.tool.last_line=ok", weight="2"];
+  PatternAnalysisArtifactGate -> PatternAnalysis           [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=2"];
   FormAndTestHypothesis    -> HypothesisGate;
   HypothesisGate           -> DelegateFix               [condition="context.tool.last_line=confirmed", weight="2"];
   HypothesisGate           -> ReproduceAndInvestigate   [condition="context.tool.last_line=not_confirmed", loop_restart="true", label="new hypothesis, back to Phase 1"];
