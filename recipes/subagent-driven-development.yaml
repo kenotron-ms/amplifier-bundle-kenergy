@@ -270,6 +270,7 @@ stages:
           import json
           import os
           import re
+          import subprocess
           from pathlib import Path
 
           raw = Path(os.environ["PLAN_PATH"]).expanduser()
@@ -286,6 +287,32 @@ stages:
           packets = state_dir / "review-packages"
           briefs.mkdir(parents=True, exist_ok=True)
           packets.mkdir(parents=True, exist_ok=True)
+
+          # Keep the executor's own state directory out of `git status`
+          # without touching the project's tracked .gitignore, which is
+          # plan-authored content that finish-mode's clean-tree check (and
+          # any task plan re-deriving .gitignore contents) should judge on
+          # its own terms. `.git/info/exclude` is git-native, local-only,
+          # and shared across worktrees via --git-common-dir.
+          git_common_dir = subprocess.run(
+              ["git", "rev-parse", "--git-common-dir"],
+              capture_output=True,
+              text=True,
+              check=False,
+          )
+          if git_common_dir.returncode == 0:
+              exclude_path = Path(git_common_dir.stdout.strip()) / "info" / "exclude"
+              exclude_path.parent.mkdir(parents=True, exist_ok=True)
+              existing = (
+                  exclude_path.read_text(encoding="utf-8")
+                  if exclude_path.exists()
+                  else ""
+              )
+              if ".kenergy/" not in existing.splitlines():
+                  with exclude_path.open("a", encoding="utf-8") as f:
+                      if existing and not existing.endswith("\n"):
+                          f.write("\n")
+                      f.write(".kenergy/\n")
 
           ledger = state_dir / "ledger.md"
           identity = str(plan)
