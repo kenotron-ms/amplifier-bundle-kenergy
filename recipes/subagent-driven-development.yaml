@@ -428,10 +428,23 @@ stages:
              reject, such as an impossible or self-contradictory verification
              mandate.
 
-          Report only genuine contradictions requiring an authoritative decision.
-          Do not flag normal dependencies, implementation risks, stylistic
-          preferences, or advisory improvements. Do not implement, edit files,
-          or ask questions outside the JSON result.
+          The source plan is the sole authority; PARSED PLAN is a convenience
+          transcription of it and can itself contain transcription errors
+          (a paraphrased name, a swapped field, an invented detail). Before
+          reporting any conflict, verify it exists in the source plan's actual
+          text -- grep or quote the exact source line for every element of the
+          conflict. If a term, module name, or requirement that the parsed data
+          attributes to the plan does not appear anywhere in the source plan,
+          that is a transcription artifact of the parsing step, not a plan
+          contradiction: silently correct your own understanding from the
+          source text and do not report it as a conflict, no matter how the
+          parsed data phrased it.
+
+          Report only genuine contradictions requiring an authoritative decision
+          -- ones that persist when both sides are read directly from the source
+          plan itself. Do not flag normal dependencies, implementation risks,
+          stylistic preferences, or advisory improvements. Do not implement,
+          edit files, or ask questions outside the JSON result.
 
           Return ONLY valid JSON with exactly one of these shapes:
           {"status":"CLEAR","conflicts":[]}
