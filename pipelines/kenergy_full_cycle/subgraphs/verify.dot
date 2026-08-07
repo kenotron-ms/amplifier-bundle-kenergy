@@ -51,9 +51,9 @@ digraph verify {
   // Mandatory on mode entry, per verify.md: walk up for AGENTS.md and
   // .github/PULL_REQUEST_TEMPLATE.md; repo conventions win over defaults.
   RepoConventionsDiscovery [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Repository Conventions Discovery",
-    prompt="Walk up from the current working directory looking for AGENTS.md, and check for .github/PULL_REQUEST_TEMPLATE.md. If either exists, read it -- its gates are ADDITIVE requirements on top of the Three Checks, and when repo conventions conflict with defaults, the repo wins. If neither exists, note that Check 4 (repo-specific gates) is not applicable this run. Write .resolve/verify/conventions.json with {\"agents_md_gates\":[...],\"pr_template_items\":[...]}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"conventions_discovered\" (also print the single line: conventions_discovered). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Walk up from the current working directory looking for AGENTS.md, and check for .github/PULL_REQUEST_TEMPLATE.md. If either exists, read it -- its gates are ADDITIVE requirements on top of the Three Checks, and when repo conventions conflict with defaults, the repo wins. If neither exists, note that Check 4 (repo-specific gates) is not applicable this run. Write $execution_root/.resolve/verify/conventions.json with {\"agents_md_gates\":[...],\"pr_template_items\":[...]}"
   ];
 
   // Deterministic gate: confirm conventions.json actually exists and is
@@ -61,20 +61,20 @@ digraph verify {
   // -- never trust RepoConventionsDiscovery's own "conventions_discovered"
   // claim.
   ConventionsArtifactGate [
-    shape=parallelogram, label="Conventions Artifact Well-Formed?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('.resolve/verify/conventions.json'))\n  ok = isinstance(d.get('agents_md_gates'), list) and isinstance(d.get('pr_template_items'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
+    shape=parallelogram, goal_gate=true, retry_target="RepoConventionsDiscovery", label="Conventions Artifact Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('${execution_root}/.resolve/verify/conventions.json'))\n  ok = isinstance(d.get('agents_md_gates'), list) and isinstance(d.get('pr_template_items'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
   ];
 
   // Check 1: Implementation Verified.
   GatherImplementationEvidence [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Check 1: Implementation",
-    prompt="Run the appropriate verification for what was built, at the right level: test suite for library code, curl/HTTP for API endpoints, direct execution for scripts/CLIs, config-load + smoke path for config changes. If it's a UI change, this check defers to the ScenarioVerification subgraph. Capture the actual command and its actual output -- 'should pass' or 'looks correct' is not evidence. Write .resolve/verify/check1.json with {\"command\":\"...\",\"output\":\"...\",\"passed\":true|false,\"is_ui_change\":true|false}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"check1_done\" (also print the single line: check1_done). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Run the appropriate verification for what was built, at the right level: test suite for library code, curl/HTTP for API endpoints, direct execution for scripts/CLIs, config-load + smoke path for config changes. If it's a UI change, this check defers to the ScenarioVerification subgraph. Capture the actual command and its actual output -- 'should pass' or 'looks correct' is not evidence. Write $execution_root/.resolve/verify/check1.json with {\"command\":\"...\",\"output\":\"...\",\"passed\":true|false,\"is_ui_change\":true|false}"
   ];
 
   UIRoute [
-    shape=parallelogram, label="Is This a UI Change?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('ui' if json.load(open('.resolve/verify/check1.json'))['is_ui_change'] else 'not_ui')\""
+    shape=parallelogram, goal_gate=true, retry_target="GatherImplementationEvidence", label="Is This a UI Change?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('ui' if json.load(open('${execution_root}/.resolve/verify/check1.json'))['is_ui_change'] else 'not_ui')\""
   ];
 
   ScenarioVerification [
@@ -86,23 +86,23 @@ digraph verify {
   // Check 2: Behavior Verified -- reproduce the specific claim, not a
   // general smoke test.
   GatherBehaviorEvidence [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Check 2: Behavior Verified",
-    prompt="For new features: demonstrate the feature works with a concrete example and capture the output. For bug fixes: reproduce the ORIGINAL bug scenario and show it's fixed. For refactors: show behavior is unchanged. Write .resolve/verify/check2.json with {\"scenario\":\"...\",\"evidence\":\"...\",\"passed\":true|false}. Call the report_outcome tool with status=\"success\" and preferred_label=\"check2_done\" (also print the single line: check2_done)"
+    prompt="For new features: demonstrate the feature works with a concrete example and capture the output. For bug fixes: reproduce the ORIGINAL bug scenario and show it's fixed. For refactors: show behavior is unchanged. Write $execution_root/.resolve/verify/check2.json with {\"scenario\":\"...\",\"evidence\":\"...\",\"passed\":true|false}. "
   ];
 
   // Check 3: Edge Cases and Regressions.
   GatherEdgeCaseEvidence [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Check 3: Edge Cases",
-    prompt="Run the linter/type checker. Check for obvious regressions in related functionality. Verify error handling with bad/missing input. Write .resolve/verify/check3.json with {\"linter\":\"...\",\"type_checker\":\"...\",\"edge_case_tested\":\"...\",\"passed\":true|false}. Call the report_outcome tool with status=\"success\" and preferred_label=\"check3_done\" (also print the single line: check3_done)"
+    prompt="Run the linter/type checker. Check for obvious regressions in related functionality. Verify error handling with bad/missing input. Write $execution_root/.resolve/verify/check3.json with {\"linter\":\"...\",\"type_checker\":\"...\",\"edge_case_tested\":\"...\",\"passed\":true|false}. "
   ];
 
   // Check 4: Repo-Specific Gates -- only meaningful when conventions exist.
   GatherRepoGateEvidence [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Check 4: Repo-Specific Gates",
-    prompt="Using .resolve/verify/conventions.json, confirm every AGENTS.md gate and every PR-template checklist item is addressed by evidence already gathered above -- not waved off. Write .resolve/verify/check4.json with {\"gates_satisfied\":true|false,\"unaddressed\":[...]}. Call the report_outcome tool with status=\"success\" and preferred_label=\"check4_done\" (also print the single line: check4_done)"
+    prompt="Using $execution_root/.resolve/verify/conventions.json, confirm every AGENTS.md gate and every PR-template checklist item is addressed by evidence already gathered above -- not waved off. Write $execution_root/.resolve/verify/check4.json with {\"gates_satisfied\":true|false,\"unaddressed\":[...]}. "
   ];
 
   // Deterministic gate (added per the goal_gate self-report audit): confirm
@@ -114,8 +114,8 @@ digraph verify {
   // report_outcome zero times across every retry while still emitting
   // plausible prose).
   ChecksArtifactGate [
-    shape=parallelogram, label="All Four Check Files Well-Formed?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ndef ok(path, keys):\n    try:\n        d=json.load(open(path))\n        return all(k in d for k in keys)\n    except Exception:\n        return False\nresults = [\n    ok('.resolve/verify/check1.json', ['command','output','passed']),\n    ok('.resolve/verify/check2.json', ['scenario','evidence','passed']),\n    ok('.resolve/verify/check3.json', ['linter','type_checker','passed']),\n    ok('.resolve/verify/check4.json', ['gates_satisfied']),\n]\nprint('ok' if all(results) else 'missing')\n\""
+    shape=parallelogram, goal_gate=true, retry_target="GatherRepoGateEvidence", label="All Four Check Files Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ndef ok(path, keys):\n    try:\n        d=json.load(open(path))\n        return all(k in d for k in keys)\n    except Exception:\n        return False\nresults = [\n    ok('${execution_root}/.resolve/verify/check1.json', ['command','output','passed']),\n    ok('${execution_root}/.resolve/verify/check2.json', ['scenario','evidence','passed']),\n    ok('${execution_root}/.resolve/verify/check3.json', ['linter','type_checker','passed']),\n    ok('${execution_root}/.resolve/verify/check4.json', ['gates_satisfied']),\n]\nprint('ok' if all(results) else 'missing')\n\""
   ];
 
   // THE GATE. Reuses the kenergy skill's post-work mode as the final,
@@ -147,26 +147,26 @@ digraph verify {
   // key from the same JSON object in one shot).
   OverallGate [
     shape=parallelogram, label="Proven or Asserted?", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nverdict=$(python3 -c \"import json;print(json.load(open('.resolve/verify/reality_check.json'))['verdict'])\")\nif [ \"$verdict\" = \"proven\" ]; then\n  printf '{\"route\":\"proven\",\"verify.verdict\":\"verified\"}'\nelse\n  printf '{\"route\":\"asserted\"}'\nfi"
+    tool_command="#!/bin/sh\nset -e\nverdict=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/verify/reality_check.json'))['verdict'])\")\nif [ \"$verdict\" = \"proven\" ]; then\n  printf '{\"route\":\"proven\",\"verify.verdict\":\"verified\"}'\nelse\n  printf '{\"route\":\"asserted\"}'\nfi"
   ];
 
   GatherMoreEvidence [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Gather More Evidence for the Named Gap (bounded)",
-    prompt="HoldOverallClaimToBar named this exact gap: $(python3 -c \"import json;print(json.load(open('.resolve/verify/reality_check.json'))['gap'])\"). Re-run ONLY the check that produced this gap -- do not redo checks that already produced real evidence. Update the corresponding check file with the new command and output. Call the report_outcome tool with status=\"success\" and preferred_label=\"more_evidence_gathered\" (also print the single line: more_evidence_gathered)"
+    prompt="HoldOverallClaimToBar named this exact gap: $(python3 -c \"import json;print(json.load(open('$execution_root/.resolve/verify/reality_check.json'))['gap'])\"). Re-run ONLY the check that produced this gap -- do not redo checks that already produced real evidence. Update the corresponding check file with the new command and output. "
   ];
 
   // Also writes verify.verdict="not_verified" on the exhausted path (the
   // other terminal path into Report besides OverallGate's "proven" route).
   CheckRetryCount [
     shape=parallelogram, label="Retry Bound (2 rounds)", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\ncount=$(python3 ../../scripts/bump_retry.py --state-file .resolve/verify/retry_count.json)\nif [ \"$count\" -le 2 ]; then\n  printf '{\"route\":\"retry\"}'\nelse\n  printf '{\"route\":\"exhausted\",\"verify.verdict\":\"not_verified\"}'\nfi"
+    tool_command="#!/bin/sh\nset -e\ncount=$(python3 ../../scripts/bump_retry.py --state-file ${execution_root}/.resolve/verify/retry_count.json)\nif [ \"$count\" -le 2 ]; then\n  printf '{\"route\":\"retry\"}'\nelse\n  printf '{\"route\":\"exhausted\",\"verify.verdict\":\"not_verified\"}'\nfi"
   ];
 
   Report [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Verification Report",
-    prompt="Present the Verification Report: Implementation (command, result, expected, status), Behavior (scenario, result), Edge Cases (linter/type-checker/edge-case results), Repo Gates (if applicable). Verdict: VERIFIED or NOT VERIFIED. If NOT VERIFIED, name exactly what remains. Call the report_outcome tool with status=\"success\" and preferred_label=\"reported\" (also print the single line: reported)"
+    prompt="Present the Verification Report: Implementation (command, result, expected, status), Behavior (scenario, result), Edge Cases (linter/type-checker/edge-case results), Repo Gates (if applicable). Verdict: VERIFIED or NOT VERIFIED. If NOT VERIFIED, name exactly what remains. "
   ];
 
   Start                        -> RepoConventionsDiscovery;
@@ -190,6 +190,5 @@ digraph verify {
   CheckRetryCount                  -> GatherMoreEvidence     [condition="context.route=retry"];
   CheckRetryCount                  -> Report                 [condition="context.route=exhausted", label="report NOT VERIFIED, hand off to /debug"];
   GatherMoreEvidence                -> HoldOverallClaimToBar  [loop_restart="true"];
-
   Report                            -> Exit;
 }

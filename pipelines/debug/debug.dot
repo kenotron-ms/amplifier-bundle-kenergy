@@ -55,9 +55,9 @@ digraph debug {
 
   // Phase 1: Reproduce and Investigate.
   ReproduceAndInvestigate [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Reproduce & Investigate (Phase 1)",
-    prompt="Bug: ${bug_description}\n\nRead error messages and stack traces COMPLETELY -- note line numbers, file paths, error codes. Reproduce consistently: can you trigger it reliably, what are the exact steps? If not reproducible, gather more data -- do not guess. Check recent changes (git diff, git log --oneline -10). In multi-component systems, log what enters/exits each boundary and run once to see WHERE it breaks before analyzing. Trace data flow backward from the error to its source -- fix at source, not symptom.\n\nWrite .resolve/debug/reproduction.json with {\"repro_steps\":\"...\",\"reproducible\":true|false,\"evidence\":\"...\"}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"investigated\" (also print the single line: investigated). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Bug: $bug_description\n\nRead error messages and stack traces COMPLETELY -- note line numbers, file paths, error codes. Reproduce consistently: can you trigger it reliably, what are the exact steps? If not reproducible, gather more data -- do not guess. Check recent changes (git diff, git log --oneline -10). In multi-component systems, log what enters/exits each boundary and run once to see WHERE it breaks before analyzing. Trace data flow backward from the error to its source -- fix at source, not symptom.\n\nWrite $execution_root/.resolve/debug/reproduction.json with {\"repro_steps\":\"...\",\"reproducible\":true|false,\"evidence\":\"...\"}"
   ];
 
   // Deterministic gate (added per the goal_gate self-report audit): confirm
@@ -67,49 +67,49 @@ digraph debug {
   // (model calls report_outcome / prints the line with no artifact behind
   // it).
   ReproductionArtifactGate [
-    shape=parallelogram, label="Reproduction Artifact Well-Formed?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('.resolve/debug/reproduction.json'))\n  ok = 'repro_steps' in d and isinstance(d.get('reproducible'), bool)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
+    shape=parallelogram, goal_gate=true, retry_target="ReproduceAndInvestigate", label="Reproduction Artifact Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('${execution_root}/.resolve/debug/reproduction.json'))\n  ok = 'repro_steps' in d and isinstance(d.get('reproducible'), bool)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
   ];
 
   // Phase 2: Pattern Analysis.
   PatternAnalysis [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Pattern Analysis (Phase 2)",
-    prompt="Locate similar working code in the same codebase. If implementing/comparing against a reference pattern, read it completely -- don't skim. Identify every difference between working and broken, however small. Understand what dependencies, config, and assumptions the broken code needs.\n\nWrite .resolve/debug/pattern_analysis.json with {\"working_example\":\"...\",\"differences\":[...]}. Call the report_outcome tool with status=\"success\" and preferred_label=\"pattern_analyzed\" (also print the single line: pattern_analyzed)"
+    prompt="Locate similar working code in the same codebase. If implementing/comparing against a reference pattern, read it completely -- don't skim. Identify every difference between working and broken, however small. Understand what dependencies, config, and assumptions the broken code needs.\n\nWrite $execution_root/.resolve/debug/pattern_analysis.json with {\"working_example\":\"...\",\"differences\":[...]}. "
   ];
 
   // Deterministic gate: same pattern as ReproductionArtifactGate above --
   // confirm pattern_analysis.json exists and is well-formed before trusting
   // PatternAnalysis's own claim.
   PatternAnalysisArtifactGate [
-    shape=parallelogram, label="Pattern Analysis Artifact Well-Formed?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('.resolve/debug/pattern_analysis.json'))\n  ok = 'working_example' in d and isinstance(d.get('differences'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
+    shape=parallelogram, goal_gate=true, retry_target="PatternAnalysis", label="Pattern Analysis Artifact Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('${execution_root}/.resolve/debug/pattern_analysis.json'))\n  ok = 'working_example' in d and isinstance(d.get('differences'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
   ];
 
   // Phase 3: Hypothesis and Test -- scientific method, one variable at a time.
   FormAndTestHypothesis [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Form & Test Hypothesis (Phase 3)",
-    prompt="State clearly: 'I think X is the root cause because Y.' Design the SMALLEST test that would confirm or deny this -- one variable at a time. Run it and gather real evidence. Write .resolve/debug/hypothesis.json with {\"hypothesis\":\"...\",\"test\":\"...\",\"confirmed\":true|false,\"evidence\":\"...\"}. If you don't understand something, say so explicitly -- don't pretend to know. Call the report_outcome tool with status=\"success\" and preferred_label=\"hypothesis_tested\" (also print the single line: hypothesis_tested)"
+    prompt="State clearly: 'I think X is the root cause because Y.' Design the SMALLEST test that would confirm or deny this -- one variable at a time. Run it and gather real evidence. Write $execution_root/.resolve/debug/hypothesis.json with {\"hypothesis\":\"...\",\"test\":\"...\",\"confirmed\":true|false,\"evidence\":\"...\"}. If you don't understand something, say so explicitly -- don't pretend to know. "
   ];
 
   HypothesisGate [
-    shape=parallelogram, label="Hypothesis Confirmed?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('confirmed' if json.load(open('.resolve/debug/hypothesis.json'))['confirmed'] else 'not_confirmed')\""
+    shape=parallelogram, goal_gate=true, retry_target="FormAndTestHypothesis", label="Hypothesis Confirmed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('confirmed' if json.load(open('${execution_root}/.resolve/debug/hypothesis.json'))['confirmed'] else 'not_confirmed')\""
   ];
 
   // Phase 4: Fix -- delegated, never done by the orchestrator itself.
   DelegateFix [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Delegate the Fix (Phase 4)",
-    prompt="Root cause confirmed: $(cat .resolve/debug/hypothesis.json). Delegate to foundation:bug-hunter or kenergy:implementer: reproduce the bug first to confirm it still exists, apply the minimal fix, verify with real execution that the bug is gone, commit. Write .resolve/debug/fix_attempt.json with {\"commit_sha\":\"...\",\"attempt_number\":<int>}. Call the report_outcome tool with status=\"success\" and preferred_label=\"fix_delegated\" (also print the single line: fix_delegated)"
+    prompt="Root cause confirmed: $(cat $execution_root/.resolve/debug/hypothesis.json). Delegate to foundation:bug-hunter or kenergy:implementer: reproduce the bug first to confirm it still exists, apply the minimal fix, verify with real execution that the bug is gone, commit. Write $execution_root/.resolve/debug/fix_attempt.json with {\"commit_sha\":\"...\",\"attempt_number\":<int>}. "
   ];
 
   // THE GATE. Never trust the fix delegation's own claim -- re-run the
   // ORIGINAL Phase 1 reproduction steps and read real output.
   VerifyFixIndependently [
-    shape=parallelogram, label="Verify Fix Independently (re-run original repro)",
-    tool_command="#!/bin/sh\nset -e\npython3 ../../scripts/rerun_repro.py --repro-file .resolve/debug/reproduction.json --at-commit \"$(python3 -c \\\"import json;print(json.load(open('.resolve/debug/fix_attempt.json'))['commit_sha'])\\\")\""
+    shape=parallelogram, goal_gate=true, retry_target="DelegateFix", label="Verify Fix Independently (re-run original repro)",
+    tool_command="#!/bin/sh\nset -e\nresult=$(python3 -c \"\nimport json, subprocess, sys\ntry:\n  commit = json.load(open('${execution_root}/.resolve/debug/fix_attempt.json'))['commit_sha']\nexcept Exception:\n  print('FAIL'); sys.exit(0)\nif not commit:\n  print('FAIL'); sys.exit(0)\ntry:\n  repro = json.load(open('${execution_root}/.resolve/debug/reproduction.json'))\nexcept Exception:\n  print('FAIL'); sys.exit(0)\nif 'reproducible' not in repro:\n  print('FAIL'); sys.exit(0)\nr = subprocess.run(['git','cat-file','-e',commit], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\nif r.returncode != 0:\n  print('FAIL'); sys.exit(0)\nhead = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()\nr2 = subprocess.run(['git','merge-base','--is-ancestor',commit,head], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\nif r2.returncode != 0:\n  print('FAIL'); sys.exit(0)\nif repro.get('reproducible') is True:\n  print('FAIL'); sys.exit(0)\nprint('PASS')\n\")\nif [ \"$result\" = \"PASS\" ]; then printf 'bug_gone'; else printf 'bug_still_present'; fi"
   ];
 
   // Bounded escalation: 3+ failures = architectural problem, not a fourth
@@ -117,7 +117,7 @@ digraph debug {
   // "Discuss with the user before attempting more fixes."
   CheckAttemptCount [
     shape=parallelogram, label="Attempt Count",
-    tool_command="#!/bin/sh\nset -e\ncount=$(python3 -c \"import json;print(json.load(open('.resolve/debug/fix_attempt.json'))['attempt_number'])\")\nif [ \"$count\" -lt 3 ]; then printf 'retry'; else printf 'escalate'; fi"
+    tool_command="#!/bin/sh\nset -e\ncount=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/debug/fix_attempt.json'))['attempt_number'])\")\nif [ \"$count\" -lt 3 ]; then printf 'retry'; else printf 'escalate'; fi"
   ];
 
   ArchitectureEscalation [
@@ -127,9 +127,9 @@ digraph debug {
   ];
 
   Report [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Report",
-    prompt="Bug fixed and independently verified. Root cause: $(cat .resolve/debug/hypothesis.json). Fix commit: $(cat .resolve/debug/fix_attempt.json). Call the report_outcome tool with status=\"success\" and preferred_label=\"reported\" (also print the single line: reported)"
+    prompt="Bug fixed and independently verified. Root cause: $(cat $execution_root/.resolve/debug/hypothesis.json). Fix commit: $(cat $execution_root/.resolve/debug/fix_attempt.json). "
   ];
 
   Start                    -> ReproduceAndInvestigate;

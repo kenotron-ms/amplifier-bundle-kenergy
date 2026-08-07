@@ -31,9 +31,9 @@ digraph integration_testing_gate {
   // it cannot "quick fix" because fixing isn't available to it; only
   // observation and recording are.
   ObserveRun [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Observe Full Run (no fixes)",
-    prompt="Run the integration/E2E scenario for task ${task_id} to completion or real failure. OBSERVE FIRST. Do not make any code change during this run, no matter how small or obviously correct the fix seems -- one fix mid-run invalidates the whole run.\n\nDo not declare 'stuck' from wall-clock time alone. Check actual error signals: exit codes, error messages in logs, process death, hung processes. If progress seems inconsistent with what an API/monitor reports, check the container's internal state directly (docker exec: ls, cat trackers, ps aux) rather than trusting the monitor.\n\nCapture EVERY failure the run surfaces, in the order they occur, with exact error text and exact reproduction steps. Write .resolve/build/integration_observations_${task_id}.json with {\"clean\":true|false,\"failures\":[{\"error\":\"...\",\"where\":\"...\",\"repro\":\"...\"}]}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"run_observed\" (also print the single line: run_observed). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Run the integration/E2E scenario for task $task_id to completion or real failure. OBSERVE FIRST. Do not make any code change during this run, no matter how small or obviously correct the fix seems -- one fix mid-run invalidates the whole run.\n\nDo not declare 'stuck' from wall-clock time alone. Check actual error signals: exit codes, error messages in logs, process death, hung processes. If progress seems inconsistent with what an API/monitor reports, check the container's internal state directly (docker exec: ls, cat trackers, ps aux) rather than trusting the monitor.\n\nCapture EVERY failure the run surfaces, in the order they occur, with exact error text and exact reproduction steps. Write $execution_root/.resolve/build/integration_observations_$task_id.json with {\"clean\":true|false,\"failures\":[{\"error\":\"...\",\"where\":\"...\",\"repro\":\"...\"}]}"
   ];
 
   // Writes context.integration.result / integration.report_path directly
@@ -43,25 +43,25 @@ digraph integration_testing_gate {
   // ever actually set them (same missing-writer bug class as
   // scenario_verification.dot's identical scenario.* fix above).
   ObservationGate [
-    shape=parallelogram, label="Clean or Failures Found?", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nclean=$(python3 -c \"import json;d=json.load(open('.resolve/build/integration_observations_${task_id}.json'));print('clean' if d['clean'] else 'has_failures')\")\nif [ \"$clean\" = clean ] && [ -f \".resolve/build/integration_fix_batch_${task_id}.json\" ]; then\n  result=failures_batched_and_fixed\nelse\n  result=\"$clean\"\nfi\nprintf '{\"route\":\"%s\",\"integration.result\":\"%s\",\"integration.report_path\":\".resolve/build/integration_observations_${task_id}.json\"}' \"$clean\" \"$result\""
+    shape=parallelogram, goal_gate=true, retry_target="ObserveRun", label="Clean or Failures Found?", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nclean=$(python3 -c \"import json;d=json.load(open('${execution_root}/.resolve/build/integration_observations_${task_id}.json'));print('clean' if d['clean'] else 'has_failures')\")\nif [ \"$clean\" = clean ] && [ -f \"${execution_root}/.resolve/build/integration_fix_batch_${task_id}.json\" ]; then\n  result=failures_batched_and_fixed\nelse\n  result=\"$clean\"\nfi\nprintf '{\"route\":\"%s\",\"integration.result\":\"%s\",\"integration.report_path\":\"${execution_root}/.resolve/build/integration_observations_${task_id}.json\"}' \"$clean\" \"$result\""
   ];
 
   // Principle 1 (fix in batches, only after observation stops) and
   // Principle 4 (one run, all errors, fixed in dependency order).
   FixBatch [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Fix Observed Failures (batch)",
-    prompt="Read every failure in .resolve/build/integration_observations_${task_id}.json. Address them together, in dependency order (fix the failure that unblocks others first). Do not fix one and start a new run to check it -- fix the whole batch, then hand off to a single fresh validation run.\n\nWrite .resolve/build/integration_fix_batch_${task_id}.json with {\"fixes_applied\":[{\"failure\":\"...\",\"fix\":\"...\",\"commit_sha\":\"...\"}]}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"batch_fixed\" (also print the single line: batch_fixed). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Read every failure in $execution_root/.resolve/build/integration_observations_$task_id.json. Address them together, in dependency order (fix the failure that unblocks others first). Do not fix one and start a new run to check it -- fix the whole batch, then hand off to a single fresh validation run.\n\nWrite $execution_root/.resolve/build/integration_fix_batch_$task_id.json with {\"fixes_applied\":[{\"failure\":\"...\",\"fix\":\"...\",\"commit_sha\":\"...\"}]}"
   ];
 
   // A second full observation run, never a partial re-check of just the
   // fixed failures -- matches Principle 4's "1 observation run + 1
   // validation run", not N interrupted runs.
   ValidationRun [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Fresh Validation Run",
-    prompt="Run the same integration/E2E scenario for task ${task_id} again, fresh and complete, to confirm the fix batch actually converged. Write .resolve/build/integration_observations_${task_id}.json (overwrite) with the same shape as before. Call the report_outcome tool with status=\"success\" and preferred_label=\"validation_run_done\" (also print the single line: validation_run_done)"
+    prompt="Run the same integration/E2E scenario for task $task_id again, fresh and complete, to confirm the fix batch actually converged. Write $execution_root/.resolve/build/integration_observations_$task_id.json (overwrite) with the same shape as before. "
   ];
 
   Start            -> ObserveRun;

@@ -54,7 +54,8 @@
 //
 // Context inputs:
 //   $topic           - the idea/feature being designed
-//   $execution_root   - worktree/repo root build_like_ken executes inside
+//   $execution_root   - worktree/repo root every phase executes inside (all
+//                        .resolve/ state and doc writes are anchored here)
 //
 // Context outputs:
 //   cycle.finish_action - "merge" | "pr" | "keep" | "discard"
@@ -191,9 +192,9 @@ digraph kenergy_full_cycle {
   ];
 
   Report [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Report Full Cycle",
-    prompt="Summarize the complete cycle: design (${design.design_doc}), plan (${plan.plan_doc}), build (${build.tasks_completed} tasks, verdict ${build.verdict}), verify (${verify.verdict}, if run), finish (${finish.action}). Call the report_outcome tool with status=\"success\" and preferred_label=\"cycle_reported\" (also print the single line: cycle_reported)"
+    prompt="Summarize the complete cycle: design ($design_doc), plan ($plan_path), build (${build.tasks_completed} tasks, verdict ${build.verdict}), verify (${verify.verdict}, if run), finish (${finish.action}). "
   ];
 
   Start                -> ThinkLikeKen;

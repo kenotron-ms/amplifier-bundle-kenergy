@@ -58,9 +58,9 @@ digraph think_like_ken {
 
   // Phase 1: Understand Context
   UnderstandContext [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Understand Context (Phase 1)",
-    prompt="Topic: ${topic}\n\nBefore asking any question: check the current project state (files, docs, recent commits), read referenced documents or existing designs, gather relevant evidence, precedent, and research. State what you understand about the project context. Write .resolve/design/context.json with {\"summary\":\"...\",\"open_questions\":[...]} -- open_questions are candidate genuine user-only forks, not yet confirmed\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"context_understood\" (also print the single line: context_understood). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Topic: $topic\n\nBefore asking any question: check the current project state (files, docs, recent commits), read referenced documents or existing designs, gather relevant evidence, precedent, and research. State what you understand about the project context. Write $execution_root/.resolve/design/context.json with {\"summary\":\"...\",\"open_questions\":[...]} -- open_questions are candidate genuine user-only forks, not yet confirmed"
   ];
 
   // Deterministic gate (added per the goal_gate self-report audit): never
@@ -71,8 +71,8 @@ digraph think_like_ken {
   // This reads the FILE the prompt requires and checks it has the two
   // required keys with real values, never the box node's own claim.
   ContextArtifactGate [
-    shape=parallelogram, label="Context Artifact Written?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json,sys\ntry:\n  d=json.load(open('.resolve/design/context.json'))\n  ok = isinstance(d.get('summary'), str) and d['summary'].strip() != '' and isinstance(d.get('open_questions'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
+    shape=parallelogram, goal_gate=true, retry_target="UnderstandContext", label="Context Artifact Written?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json,sys\ntry:\n  d=json.load(open('${execution_root}/.resolve/design/context.json'))\n  ok = isinstance(d.get('summary'), str) and d['summary'].strip() != '' and isinstance(d.get('open_questions'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
   ];
 
   // Phase 2: Resolve Genuine User-Only Forks -- a real loop, gated on
@@ -82,14 +82,14 @@ digraph think_like_ken {
   // questions by topic... End this phase as soon as no user-only fork
   // remains."
   IdentifyForks [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Identify Remaining Genuine Forks",
-    prompt="Given the context in .resolve/design/context.json and any prior answers in .resolve/design/fork_answers.json (if it exists), list only the OPEN decisions that are genuine personal-preference questions or facts only the user knows -- not engineering questions with a defensible answer. Batch them by topic; never split one topic into micro-decisions. Write .resolve/design/forks.json with {\"has_forks\":true|false,\"forks\":[{\"topic\":\"...\",\"question\":\"...\"}]}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"forks_identified\" (also print the single line: forks_identified). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Given the context in $execution_root/.resolve/design/context.json and any prior answers in $execution_root/.resolve/design/fork_answers.json (if it exists), list only the OPEN decisions that are genuine personal-preference questions or facts only the user knows -- not engineering questions with a defensible answer. Batch them by topic; never split one topic into micro-decisions. Write $execution_root/.resolve/design/forks.json with {\"has_forks\":true|false,\"forks\":[{\"topic\":\"...\",\"question\":\"...\"}]}"
   ];
 
   ForkGate [
-    shape=parallelogram, label="Any Forks Remaining?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('has_forks' if json.load(open('.resolve/design/forks.json'))['has_forks'] else 'no_forks')\""
+    shape=parallelogram, goal_gate=true, retry_target="IdentifyForks", label="Any Forks Remaining?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('has_forks' if json.load(open('${execution_root}/.resolve/design/forks.json'))['has_forks'] else 'no_forks')\""
   ];
 
   ResolveForks [
@@ -108,14 +108,14 @@ digraph think_like_ken {
   // dispatches, matching the mode's explicit "embody an inline persona lens;
   // do not dispatch it as a separate agent."
   SynthesizeDecisions [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Synthesize Evidence-Backed Decisions (Phase 3)",
-    prompt="For every remaining engineering decision with a defensible answer, decide directly using evidence, precedent, research, and the project's constraints. Apply YAGNI ruthlessly -- no speculative features. Record each choice and brief reasoning. Write .resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}], \"needs_simplicity_lens\":true|false, \"needs_consequence_lens\":true|false}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"decisions_synthesized\" (also print the single line: decisions_synthesized). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="For every remaining engineering decision with a defensible answer, decide directly using evidence, precedent, research, and the project's constraints. Apply YAGNI ruthlessly -- no speculative features. Record each choice and brief reasoning. Write $execution_root/.resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}], \"needs_simplicity_lens\":true|false, \"needs_consequence_lens\":true|false}"
   ];
 
   DecisionRoute [
-    shape=parallelogram, label="Which Lens, If Any?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('.resolve/design/decisions.json'));print('both' if d['needs_simplicity_lens'] and d['needs_consequence_lens'] else 'simplicity' if d['needs_simplicity_lens'] else 'consequence' if d['needs_consequence_lens'] else 'none')\""
+    shape=parallelogram, goal_gate=true, retry_target="SynthesizeDecisions", label="Which Lens, If Any?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/design/decisions.json'));print('both' if d['needs_simplicity_lens'] and d['needs_consequence_lens'] else 'simplicity' if d['needs_simplicity_lens'] else 'consequence' if d['needs_consequence_lens'] else 'none')\""
   ];
 
   // `inputs="decisions_path"` was inert (PipelineHandler.execute() never
@@ -144,9 +144,9 @@ digraph think_like_ken {
   // pre-delegation approval gate. "Do not ask for section-level approval or
   // create another approval checkpoint after it."
   ConsolidatedReview [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Consolidated Review (Phase 4)",
-    prompt="Present ONE consolidated review covering: the goal, recommended approach, key components, important trade-offs, evidence-backed decisions (from .resolve/design/decisions.json), any lens critique incorporated (${cosam.findings} ${coe.findings}), and any remaining genuine forks. This is the ONLY approval gate in this mode -- do not fragment it into sections. Call the report_outcome tool with status=\"success\" and preferred_label=\"review_presented\" (also print the single line: review_presented)"
+    prompt="Present ONE consolidated review covering: the goal, recommended approach, key components, important trade-offs, evidence-backed decisions (from $execution_root/.resolve/design/decisions.json), any lens critique incorporated (${cosam.findings} ${coe.findings}), and any remaining genuine forks. This is the ONLY approval gate in this mode -- do not fragment it into sections. "
   ];
 
   ConsolidatedApproval [
@@ -164,17 +164,17 @@ digraph think_like_ken {
   ];
 
   ReviseSynthesis [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Incorporate Corrections",
-    prompt="Incorporate the human's corrections (${last_response}) into .resolve/design/decisions.json. Call the report_outcome tool with status=\"success\" and preferred_label=\"synthesis_revised\" (also print the single line: synthesis_revised)"
+    prompt="Incorporate the human's corrections ($last_response) into $execution_root/.resolve/design/decisions.json. "
   ];
 
   // Phase 5: Delegate Design Document Creation -- mandatory delegation, the
   // mode itself cannot write files (write_file/edit_file blocked structurally).
   DelegateDesignWriter [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Delegate to Design-Writer",
-    prompt="Delegate document creation to kenergy:design-writer. Include the complete approved consolidated review and all resolved fork answers. Instruct it to save to docs/plans/<date>-<topic>-design.md with: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Write .resolve/design/design_doc_path.txt with the saved path. Call the report_outcome tool with status=\"success\" and preferred_label=\"design_delegated\" (also print the single line: design_delegated)"
+    prompt="Delegate document creation to kenergy:design-writer. Include the complete approved consolidated review and all resolved fork answers. Instruct it to save to $execution_root/docs/plans/<date>-<topic>-design.md with: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Write $execution_root/.resolve/design/design_doc_path.txt with the saved path. "
   ];
 
   // Deterministic gate: DelegateDesignWriter's own report_outcome claim is
@@ -182,44 +182,44 @@ digraph think_like_ken {
   // the path it was supposed to write actually exists and the file it
   // points at is non-empty before SelfReview reads it.
   DesignDocArtifactGate [
-    shape=parallelogram, label="Design Doc Actually Saved?",
-    tool_command="#!/bin/sh\nset -e\npath=$(cat .resolve/design/design_doc_path.txt 2>/dev/null || true)\nif [ -n \"$path\" ] && [ -s \"$path\" ]; then printf 'ok'; else printf 'missing'; fi"
+    shape=parallelogram, goal_gate=true, retry_target="DelegateDesignWriter", label="Design Doc Actually Saved?",
+    tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/design/design_doc_path.txt 2>/dev/null || true)\nif [ -n \"$path\" ] && [ -s \"$path\" ]; then printf 'ok'; else printf 'missing'; fi"
   ];
 
   // Phase 6: Spec Self-Review -- 4-point checklist, then adversarial review,
   // capped at 3 cycles.
   SelfReview [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Spec Self-Review (4-point checklist)",
-    prompt="Read the design document at $(cat .resolve/design/design_doc_path.txt). Check: (1) Placeholder scan -- no [TBD]/[TODO]/[FILL IN]/empty sections; (2) Internal consistency -- component names, data flows, interfaces align throughout; (3) Scope check -- every item traces to a user requirement, nothing extra snuck in; (4) Ambiguity check -- no vague terms like 'handle errors appropriately' without specifics. Write .resolve/design/self_review.json with {\"pass\":true|false,\"issues\":[...]}\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"self_reviewed\" (also print the single line: self_reviewed). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Read the design document at $(cat $execution_root/.resolve/design/design_doc_path.txt). Check: (1) Placeholder scan -- no [TBD]/[TODO]/[FILL IN]/empty sections; (2) Internal consistency -- component names, data flows, interfaces align throughout; (3) Scope check -- every item traces to a user requirement, nothing extra snuck in; (4) Ambiguity check -- no vague terms like 'handle errors appropriately' without specifics. Write $execution_root/.resolve/design/self_review.json with {\"pass\":true|false,\"issues\":[...]}"
   ];
 
   SelfReviewGate [
-    shape=parallelogram, label="Self-Review Pass?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('pass' if json.load(open('.resolve/design/self_review.json'))['pass'] else 'fail')\""
+    shape=parallelogram, goal_gate=true, retry_target="SelfReview", label="Self-Review Pass?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('pass' if json.load(open('${execution_root}/.resolve/design/self_review.json'))['pass'] else 'fail')\""
   ];
 
   FixSelfReview [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Re-delegate Corrections",
-    prompt="Re-delegate to kenergy:design-writer with the specific issues from .resolve/design/self_review.json. Call the report_outcome tool with status=\"success\" and preferred_label=\"self_review_fixed\" (also print the single line: self_review_fixed)"
+    prompt="Re-delegate to kenergy:design-writer with the specific issues from $execution_root/.resolve/design/self_review.json. "
   ];
 
   AdversarialReview [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Antagonistic Spec Review",
-    prompt="Dispatch an adversarial review of $(cat .resolve/design/design_doc_path.txt) using the prompt at kenergy:context/spec-document-review-prompt.md. Write .resolve/design/adversarial_review.json with {\"pass\":true|false,\"findings\":[...],\"cycle\":<int>}. Call the report_outcome tool with status=\"success\" and preferred_label=\"adversarial_reviewed\" (also print the single line: adversarial_reviewed)"
+    prompt="Dispatch an adversarial review of $(cat $execution_root/.resolve/design/design_doc_path.txt) using the prompt at kenergy:context/spec-document-review-prompt.md. Write $execution_root/.resolve/design/adversarial_review.json with {\"pass\":true|false,\"findings\":[...],\"cycle\":<int>}. "
   ];
 
   AdversarialGate [
-    shape=parallelogram, label="Adversarial Review Pass or Cap Reached?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\nd=json.load(open('.resolve/design/adversarial_review.json'))\nif d['pass']: print('pass')\nelif d['cycle'] >= 3: print('cap_reached')\nelse: print('revise')\n\""
+    shape=parallelogram, goal_gate=true, retry_target="AdversarialReview", label="Adversarial Review Pass or Cap Reached?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\nd=json.load(open('${execution_root}/.resolve/design/adversarial_review.json'))\nif d['pass']: print('pass')\nelif d['cycle'] >= 3: print('cap_reached')\nelse: print('revise')\n\""
   ];
 
   Report [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Report Final Artifact",
-    prompt="Design document saved to $(cat .resolve/design/design_doc_path.txt). The approved design is complete and ready for implementation planning. Call the report_outcome tool with status=\"success\" and preferred_label=\"reported\" (also print the single line: reported)"
+    prompt="Design document saved to $(cat $execution_root/.resolve/design/design_doc_path.txt). The approved design is complete and ready for implementation planning. "
   ];
 
   Start                       -> UnderstandContext;
@@ -244,7 +244,6 @@ digraph think_like_ken {
   CheckConsolidatedApproval     -> DelegateDesignWriter [condition="context.tool.last_line=approved", weight="2"];
   CheckConsolidatedApproval     -> ReviseSynthesis      [condition="context.tool.last_line=revise"];
   ReviseSynthesis               -> ConsolidatedReview   [loop_restart="true"];
-
   DelegateDesignWriter            -> DesignDocArtifactGate;
   DesignDocArtifactGate           -> SelfReview             [condition="context.tool.last_line=ok", weight="2"];
   DesignDocArtifactGate           -> DelegateDesignWriter    [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- doc not actually saved, bounded by default_max_retry=3"];
@@ -252,7 +251,6 @@ digraph think_like_ken {
   SelfReviewGate                 -> AdversarialReview   [condition="context.tool.last_line=pass", weight="2"];
   SelfReviewGate                 -> FixSelfReview        [condition="context.tool.last_line=fail"];
   FixSelfReview                   -> SelfReview          [loop_restart="true"];
-
   AdversarialReview                -> AdversarialGate;
   AdversarialGate                  -> Report             [condition="context.tool.last_line=pass", weight="2"];
   AdversarialGate                  -> Report             [condition="context.tool.last_line=cap_reached", label="3-cycle cap reached -- proceed with residual findings noted"];

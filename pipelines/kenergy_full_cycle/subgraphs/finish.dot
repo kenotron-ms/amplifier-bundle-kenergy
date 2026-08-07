@@ -85,15 +85,15 @@ digraph finish {
   ];
 
   InvalidChoice [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Reject Ambiguous Reply",
-    prompt="The reply did not exactly match merge, pr, keep, or discard. State that plainly and ask again -- do not guess or default to any action. Call the report_outcome tool with status=\"success\" and preferred_label=\"invalid_reported\" (also print the single line: invalid_reported)"
+    prompt="The reply did not exactly match merge, pr, keep, or discard. State that plainly and ask again -- do not guess or default to any action. "
   ];
 
   ExecuteMerge [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Execute Merge",
-    prompt="cd ${entry_paths.main_repo_path}. Fast-forward merge ${entry_paths.branch_name} into its base branch. Do not force-push. Write .resolve/finish/merge_attempt.json with {\"attempted_sha\":\"...\"}. Call the report_outcome tool with status=\"success\" and preferred_label=\"merge_attempted\" (also print the single line: merge_attempted)"
+    prompt="cd ${entry_paths.main_repo_path}. Fast-forward merge ${entry_paths.branch_name} into its base branch. Do not force-push. Write $execution_root/.resolve/finish/merge_attempt.json with {\"attempted_sha\":\"...\"}. "
   ];
 
   // Writes finish.action / finish.merge_sha directly (parse_json="true") --
@@ -101,14 +101,14 @@ digraph finish {
   // node previously wrote them (same missing-writer bug fixed identically
   // in build_like_ken.dot's build.verdict and verify.dot's verify.verdict).
   ConfirmMergeLanded [
-    shape=parallelogram, label="Confirm Merge Landed", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nsha=$(python3 -c \"import json;print(json.load(open('.resolve/finish/merge_attempt.json'))['attempted_sha'])\")\nif git -C \"${entry_paths.main_repo_path}\" log --oneline -1 | grep -q \"$sha\"; then\n  printf '{\"route\":\"merge_confirmed\",\"finish.action\":\"merge\",\"finish.merge_sha\":\"%s\"}' \"$sha\"\nelse\n  printf '{\"route\":\"merge_unconfirmed\"}'\nfi"
+    shape=parallelogram, goal_gate=true, retry_target="ExecuteMerge", label="Confirm Merge Landed", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nsha=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/merge_attempt.json'))['attempted_sha'])\")\nif git -C \"${entry_paths.main_repo_path}\" log --oneline -1 | grep -q \"$sha\"; then\n  printf '{\"route\":\"merge_confirmed\",\"finish.action\":\"merge\",\"finish.merge_sha\":\"%s\"}' \"$sha\"\nelse\n  printf '{\"route\":\"merge_unconfirmed\"}'\nfi"
   ];
 
   ExecutePR [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Execute Open PR",
-    prompt="cd ${entry_paths.main_repo_path}. Push ${entry_paths.branch_name} and open a PR via gh pr create. Write .resolve/finish/pr_attempt.json with {\"attempted_url\":\"...\"}. Call the report_outcome tool with status=\"success\" and preferred_label=\"pr_attempted\" (also print the single line: pr_attempted)"
+    prompt="cd ${entry_paths.main_repo_path}. Push ${entry_paths.branch_name} and open a PR via gh pr create. Write $execution_root/.resolve/finish/pr_attempt.json with {\"attempted_url\":\"...\"}. "
   ];
 
   // Faithful to this repo's own deliver_pr.dot CheckPROpened case study
@@ -116,14 +116,14 @@ digraph finish {
   // Writes finish.action / finish.pr_url directly (parse_json="true") -- see
   // ConfirmMergeLanded's note above for the same fix on the merge path.
   ConfirmPROpened [
-    shape=parallelogram, label="Confirm PR Opened", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nurl=$(python3 -c \"import json;print(json.load(open('.resolve/finish/pr_attempt.json'))['attempted_url'])\")\nif gh pr view \"$url\" >/dev/null 2>&1; then\n  printf '{\"route\":\"pr_confirmed\",\"finish.action\":\"pr\",\"finish.pr_url\":\"%s\"}' \"$url\"\nelse\n  printf '{\"route\":\"pr_unconfirmed\"}'\nfi"
+    shape=parallelogram, goal_gate=true, retry_target="ExecutePR", label="Confirm PR Opened", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nurl=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/pr_attempt.json'))['attempted_url'])\")\nif gh pr view \"$url\" >/dev/null 2>&1; then\n  printf '{\"route\":\"pr_confirmed\",\"finish.action\":\"pr\",\"finish.pr_url\":\"%s\"}' \"$url\"\nelse\n  printf '{\"route\":\"pr_unconfirmed\"}'\nfi"
   ];
 
   Keep [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Keep As-Is",
-    prompt="No action taken. Branch ${entry_paths.branch_name} remains at ${entry_paths.worktree_path} for later. Call the report_outcome tool with status=\"success\", context_updates={\"finish.action\": \"keep\"}, and preferred_label=\"kept\" (also print the single line: kept)"
+    prompt="No action taken. Branch ${entry_paths.branch_name} remains at ${entry_paths.worktree_path} for later. When the task above is complete, call the report_outcome tool with status=\"success\" and context_updates={\"finish.action\": \"keep\"}. This is the only requirement here -- no preferred_label is needed (routing is handled by a separate deterministic tool node downstream, not by this field). Do not respond with plain prose as your final action; the tool call itself is what satisfies this gate."
   ];
 
   // Destructive -- requires a typed confirmation, per modes/finish.md's
@@ -142,9 +142,9 @@ digraph finish {
   ];
 
   ExecuteDiscard [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Execute Discard",
-    prompt="cd ${entry_paths.main_repo_path}. git worktree remove ${entry_paths.worktree_path} then delete branch ${entry_paths.branch_name}. Call the report_outcome tool with status=\"success\", context_updates={\"finish.action\": \"discard\"}, and preferred_label=\"discarded\" (also print the single line: discarded)"
+    prompt="cd ${entry_paths.main_repo_path}. git worktree remove ${entry_paths.worktree_path} then delete branch ${entry_paths.branch_name}. When the task above is complete, call the report_outcome tool with status=\"success\" and context_updates={\"finish.action\": \"discard\"}. This is the only requirement here -- no preferred_label is needed (routing is handled by a separate deterministic tool node downstream, not by this field). Do not respond with plain prose as your final action; the tool call itself is what satisfies this gate."
   ];
 
   // Scope boundary (intentional): this graph stops at a feature-branch-ready
@@ -153,9 +153,9 @@ digraph finish {
   // that would be a separate future "ship" attractor pipeline, not an
   // addition to finish.dot.
   Report [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Report",
-    prompt="Report the confirmed finish outcome plainly -- merge sha, PR URL, kept location, or discard confirmation. Do not claim an action succeeded that was not independently confirmed above. Call the report_outcome tool with status=\"success\" and preferred_label=\"reported\" (also print the single line: reported)"
+    prompt="Report the confirmed finish outcome plainly -- merge sha, PR URL, kept location, or discard confirmation. Do not claim an action succeeded that was not independently confirmed above. "
   ];
 
   Start                     -> CaptureEntryPaths;
@@ -168,7 +168,6 @@ digraph finish {
   DetermineAction                 -> DiscardConfirmation [condition="context.tool.last_line=discard"];
   DetermineAction                  -> InvalidChoice     [condition="context.tool.last_line=invalid"];
   InvalidChoice                     -> FinishDecision [loop_restart="true"];
-
   ExecuteMerge                       -> ConfirmMergeLanded;
   ConfirmMergeLanded                  -> Report [condition="context.route=merge_confirmed", weight="2"];
   ConfirmMergeLanded                   -> ExecuteMerge [condition="context.route=merge_unconfirmed", label="retry once, bounded by default_max_retry=2"];
@@ -178,11 +177,9 @@ digraph finish {
   ConfirmPROpened                         -> ExecutePR [condition="context.route=pr_unconfirmed", label="retry once, bounded by default_max_retry=2"];
 
   Keep                                     -> Report;
-
   DiscardConfirmation                       -> CheckDiscardConfirmation [fidelity="full"];
   CheckDiscardConfirmation                   -> ExecuteDiscard [condition="context.tool.last_line=confirmed"];
   CheckDiscardConfirmation                    -> Report        [condition="context.tool.last_line=cancelled", label="cancelled -- no action taken"];
   ExecuteDiscard                               -> Report;
-
   Report                                        -> Exit;
 }

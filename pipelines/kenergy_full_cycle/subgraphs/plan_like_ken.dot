@@ -59,27 +59,27 @@ digraph plan_like_ken {
   // Interfaces, and the full per-task field set, resolved by engineering
   // judgment -- not negotiated with the human.
   DelegatePlanWriter [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Delegate to Plan-Writer",
-    prompt="Read the approved design at ${design_doc} and repository conventions. Resolve implementation-level details with engineering judgment -- do not ask the human to confirm task breakdown, granularity, ordering, or file decomposition unless the design leaves a fact only they can supply.\n\nWrite docs/plans/<date>-<feature>-implementation.md with: a header (Goal/Architecture/Tech Stack/Verification approach), a '## Global Constraints' block capturing the design's project-wide requirements verbatim, and one '### Task N' section per task, each with non-empty Description/Goal/Specification/Acceptance Criteria/Files/Interfaces (Consumes/Produces)/Model Roles (implementation_model_role, review_model_role, escalated_model_role) and complete, copy-pasteable code -- no '// add your code here' placeholders. Write .resolve/plan/plan_path.txt with the saved path\n\n=== REPORT_OUTCOME CONTRACT (MANDATORY) ===\nThis is the single most important instruction in this prompt. Do NOT respond with plain-text prose as your final action. When the task above is complete, you MUST call the report_outcome tool with status=\"success\" and preferred_label=\"plan_done\" (also print the single line: plan_done). This tool call is required for the pipeline to proceed; prose alone will fail the gate.\n=========================================="
+    prompt="Read the approved design at $design_doc and repository conventions. Resolve implementation-level details with engineering judgment -- do not ask the human to confirm task breakdown, granularity, ordering, or file decomposition unless the design leaves a fact only they can supply.\n\nWrite $execution_root/docs/plans/<date>-<feature>-implementation.md with: a header (Goal/Architecture/Tech Stack/Verification approach), a '## Global Constraints' block capturing the design's project-wide requirements verbatim, and one '### Task N' section per task, each with non-empty Description/Goal/Specification/Acceptance Criteria/Files/Interfaces (Consumes/Produces)/Model Roles (implementation_model_role, review_model_role, escalated_model_role) and complete, copy-pasteable code -- no '// add your code here' placeholders. Write $execution_root/.resolve/plan/plan_path.txt with the saved path"
   ];
 
   // THE GATE -- never trust "plan_done" as proof the required sections exist.
   ConfirmPlanArtifact [
-    shape=parallelogram, label="Confirm Plan Artifact",
-    tool_command="#!/bin/sh\nset -e\npython3 ../../scripts/confirm_plan_contract.py --plan-path-file .resolve/plan/plan_path.txt"
+    shape=parallelogram, goal_gate=true, retry_target="DelegatePlanWriter", label="Confirm Plan Artifact",
+    tool_command="#!/bin/sh\nset -e\npython3 ../../scripts/confirm_plan_contract.py --plan-path-file ${execution_root}/.resolve/plan/plan_path.txt"
   ];
 
   FixPlanArtifact [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Fix Plan Sections",
-    prompt="ConfirmPlanArtifact found this plan does not yet satisfy the required contract: ${tool.last_output}\n\nRe-delegate to kenergy:plan-writer's own contract and fix exactly the named gaps -- do not rewrite unrelated sections. Call the report_outcome tool with status=\"success\" and preferred_label=\"plan_fixed\" (also print the single line: plan_fixed)"
+    prompt="ConfirmPlanArtifact found this plan does not yet satisfy the required contract: ${tool.last_output}\n\nRe-delegate to kenergy:plan-writer's own contract and fix exactly the named gaps -- do not rewrite unrelated sections. "
   ];
 
   HandoffToExecution [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Hand Off to Execution",
-    prompt="Plan confirmed at $(cat .resolve/plan/plan_path.txt). Hand off directly to /build-like-ken (or subagent-driven-development.yaml) -- no approval prompt, no 'does this look right?' checkpoint. Call the report_outcome tool with status=\"success\" and preferred_label=\"handed_off\" (also print the single line: handed_off)"
+    prompt="Plan confirmed at $(cat $execution_root/.resolve/plan/plan_path.txt). Hand off directly to /build-like-ken (or subagent-driven-development.yaml) -- no approval prompt, no 'does this look right?' checkpoint. "
   ];
 
   Start                -> DelegatePlanWriter;
