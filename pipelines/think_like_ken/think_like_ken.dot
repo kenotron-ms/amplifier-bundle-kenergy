@@ -285,7 +285,7 @@ digraph think_like_ken {
   // promises.
   EmitDesignDocOutput [
     shape=parallelogram, parse_json="true", label="Emit design_doc for parent context",
-    tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/design/design_doc_path.txt)\npython3 -c \"import json;print(json.dumps({'design_doc': '$path'}))\""
+    tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/design/design_doc_path.txt)\npython3 -c \"import json;print(json.dumps({'design.design_doc': '$path'}))\""
   ];
 
   Report                            -> EmitDesignDocOutput;

@@ -113,7 +113,7 @@ digraph plan_like_ken {
   // literal unexpanded token, which the shell chokes on ("Bad substitution").
   EmitPlanDocOutput [
     shape=parallelogram, parse_json="true", label="Emit plan_doc for parent context",
-    tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/plan/plan_path.txt)\npython3 -c \"import json;print(json.dumps({'plan_doc': '$path'}))\""
+    tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/plan/plan_path.txt)\npython3 -c \"import json;print(json.dumps({'plan.plan_doc': '$path'}))\""
   ];
 
   HandoffToExecution    -> EmitPlanDocOutput;
