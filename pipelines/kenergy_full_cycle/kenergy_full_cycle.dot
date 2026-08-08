@@ -139,13 +139,19 @@ digraph kenergy_full_cycle {
 
   // Same rename need as the design_doc/plan_path bridges above -- debug.dot's
   // child graph reads $bug_description, but this parent only has the dotted
-  // build.blocked_task_id (set by ComputeBuildVerdictBlocked, only on the
-  // CheckBuildVerdict->Debug path -- it is UNSET on the CheckVerifyVerdict->
-  // Debug path, so this bridge must handle both entries, not just the build
-  // one the old (also-broken) inputs= attribute assumed).
-  RenameBugDescriptionForDebug [
-    shape=parallelogram, label="Bridge -> bug_description", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nif [ -n \"${build.blocked_task_id}\" ]; then\n  python3 -c \"import json;print(json.dumps({'bug_description': 'Task ${build.blocked_task_id} blocked after bounded remediation -- see build ledger for the exact blocker.'}))\"\nelse\n  python3 -c \"import json;print(json.dumps({'bug_description': 'Verify reported NOT VERIFIED -- gap: ${verdict.gap}'}))\"\nfi"
+  // build.blocked_task_id (set by ComputeBuildVerdictBlocked). Split into two
+  // unconditional bridge nodes, one per upstream edge -- the two cases are
+  // already distinguished by which upstream edge delivered control
+  // (CheckBuildVerdict.blocked vs CheckVerifyVerdict.not_verified), so no
+  // conditional logic is needed inside either tool_command.
+  RenameBugDescriptionForBuildBlocked [
+    shape=parallelogram, label="Bridge -> bug_description (build blocked)", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.dumps({'bug_description': 'Task ${build.blocked_task_id} blocked after bounded remediation -- see build ledger for the exact blocker.'}))\""
+  ];
+
+  RenameBugDescriptionForVerifyGap [
+    shape=parallelogram, label="Bridge -> bug_description (verify gap)", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.dumps({'bug_description': 'Verify reported NOT VERIFIED -- gap: ${verdict.gap}'}))\""
   ];
 
   Debug [
@@ -205,8 +211,8 @@ digraph kenergy_full_cycle {
   BuildLikeKen          -> CheckBuildVerdict;
 
   CheckBuildVerdict     -> RecommendVerify [condition="context.build.verdict=all_tasks_complete", weight="2"];
-  CheckBuildVerdict     -> RenameBugDescriptionForDebug [condition="context.build.verdict=blocked"];
-  RenameBugDescriptionForDebug -> Debug;
+  CheckBuildVerdict     -> RenameBugDescriptionForBuildBlocked [condition="context.build.verdict=blocked"];
+  RenameBugDescriptionForBuildBlocked -> Debug;
 
   // Routed back through the same rename bridges as the forward path (not
   // directly to BuildLikeKen/PlanLikeKen) -- ${plan.plan_doc}/
@@ -223,7 +229,8 @@ digraph kenergy_full_cycle {
 
   Verify                -> CheckVerifyVerdict;
   CheckVerifyVerdict    -> Finish          [condition="context.verify.verdict=verified", weight="2"];
-  CheckVerifyVerdict    -> RenameBugDescriptionForDebug [condition="context.verify.verdict=not_verified"];
+  CheckVerifyVerdict    -> RenameBugDescriptionForVerifyGap [condition="context.verify.verdict=not_verified"];
+  RenameBugDescriptionForVerifyGap -> Debug;
 
   Finish                -> Report;
   Report                 -> Exit;
