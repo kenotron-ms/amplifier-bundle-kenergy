@@ -54,6 +54,20 @@ digraph think_like_ken {
   ];
 
   Start [shape=Mdiamond, label="Start"];
+  // --- Bootstrap: fetch amplifier-bundle-kenergy's scripts/ so downstream
+  // tool_command nodes can shell out to them by an addressable path. Needed
+  // because scripts/*.py never travels with a remotely-fetched .dot file
+  // (materialize_remote_dot only fetches dot_file= targets, never files
+  // referenced only inside a tool_command string), and a tool node's CWD in
+  // some execution environments (e.g. a Resolve worker) is the *target*
+  // workspace repo, not this repo -- so a bare relative "scripts/..." or
+  // "../../scripts/..." path is not reliably resolvable. Idempotent (skips
+  // the clone if already present) so re-running this node, or reaching it
+  // both standalone and nested under kenergy_full_cycle.dot, is harmless.
+  Bootstrap [
+    shape=parallelogram, label="Bootstrap Kenergy Scripts", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nprintf '{\\\"kenergy_root\\\":\\\"%s\\\"}' \"$D\""
+  ];
   Exit  [shape=Msquare,  label="Exit"];
 
   // Phase 1: Understand Context
@@ -100,7 +114,7 @@ digraph think_like_ken {
 
   RecordForkAnswers [
     shape=parallelogram, label="Record Fork Answers",
-    tool_command="#!/bin/sh\nset -e\npython3 ../../scripts/append_fork_answers.py --reply \"${last_response}\"\nprintf 'recorded'"
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/append_fork_answers.py --reply \"${last_response}\"\nprintf 'recorded'"
   ];
 
   // Phase 3: Synthesize Evidence-Backed Decisions, with an optional inline
@@ -222,7 +236,8 @@ digraph think_like_ken {
     prompt="Design document saved to $(cat $execution_root/.resolve/design/design_doc_path.txt). The approved design is complete and ready for implementation planning. "
   ];
 
-  Start                       -> UnderstandContext;
+  Start                     -> Bootstrap;
+  Bootstrap                 -> UnderstandContext;
   UnderstandContext           -> ContextArtifactGate;
   ContextArtifactGate         -> IdentifyForks       [condition="context.tool.last_line=ok", weight="2"];
   ContextArtifactGate         -> UnderstandContext    [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=3"];
