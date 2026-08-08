@@ -144,9 +144,20 @@ digraph think_like_ken {
     prompt="For every remaining engineering decision with a defensible answer, decide directly using evidence, precedent, research, and the project's constraints. Apply YAGNI ruthlessly -- no speculative features. Record each choice and brief reasoning. Write $execution_root/.resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}], \"needs_simplicity_lens\":true|false, \"needs_consequence_lens\":true|false}"
   ];
 
-  DecisionRoute [
-    shape=parallelogram, goal_gate=true, retry_target="SynthesizeDecisions", label="Which Lens, If Any?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/design/decisions.json'));print('both' if d['needs_simplicity_lens'] and d['needs_consequence_lens'] else 'simplicity' if d['needs_simplicity_lens'] else 'consequence' if d['needs_consequence_lens'] else 'none')\""
+  // Replaces the former combinatorial DecisionRoute (4-way case computed in
+  // python from two independent booleans, only 3 of 4 outcomes wired --
+  // "both" had no edge and would fail-loud at runtime). Two sequential
+  // 2-way boolean gates represent all 4 real combinations without any
+  // shell-side classification: each gate re-reads a single boolean already
+  // decided by SynthesizeDecisions, translation not decision (Q1 legitimate).
+  NeedsSimplicityLens [
+    shape=parallelogram, goal_gate=true, retry_target="SynthesizeDecisions", label="Needs Simplicity Lens?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/design/decisions.json'));print('true' if d['needs_simplicity_lens'] else 'false')\""
+  ];
+
+  NeedsConsequenceLens [
+    shape=parallelogram, goal_gate=true, retry_target="SynthesizeDecisions", label="Needs Consequence Lens?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/design/decisions.json'));print('true' if d['needs_consequence_lens'] else 'false')\""
   ];
 
   // `inputs="decisions_path"` was inert (PipelineHandler.execute() never
@@ -264,12 +275,13 @@ digraph think_like_ken {
   ResolveForks                -> RecordForkAnswers     [fidelity="full"];
   RecordForkAnswers           -> IdentifyForks         [loop_restart="true", label="re-check for new forks"];
 
-  SynthesizeDecisions         -> DecisionRoute;
-  DecisionRoute                -> SimplicityLens   [condition="context.tool.last_line=simplicity"];
-  DecisionRoute                -> ConsequenceLens   [condition="context.tool.last_line=consequence"];
-  DecisionRoute                -> ConsolidatedReview [condition="context.tool.last_line=none", weight="2"];
-  SimplicityLens               -> ConsolidatedReview;
-  ConsequenceLens               -> ConsolidatedReview;
+  SynthesizeDecisions         -> NeedsSimplicityLens;
+  NeedsSimplicityLens           -> SimplicityLens        [condition="context.tool.last_line=true"];
+  NeedsSimplicityLens           -> NeedsConsequenceLens  [condition="context.tool.last_line=false", weight="2"];
+  SimplicityLens                -> NeedsConsequenceLens;
+  NeedsConsequenceLens          -> ConsequenceLens       [condition="context.tool.last_line=true"];
+  NeedsConsequenceLens          -> ConsolidatedReview    [condition="context.tool.last_line=false", weight="2"];
+  ConsequenceLens                -> ConsolidatedReview;
 
   ConsolidatedReview            -> ConsolidatedApproval;
   ConsolidatedApproval          -> CheckConsolidatedApproval [fidelity="full"];
