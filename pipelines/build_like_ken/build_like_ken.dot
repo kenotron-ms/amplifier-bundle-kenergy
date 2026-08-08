@@ -112,9 +112,17 @@ digraph build_like_ken {
     prompt="Read $plan_path in full, once. Scan every task for contradictions against each other, against the plan's Global Constraints, or against a mandate the merged reviewer would necessarily reject (e.g. two tasks pinning incompatible versions of the same dependency). Do NOT flag stylistic disagreements or things a reasonable engineer would resolve unassisted -- only genuine, unresolvable contradictions that only a human can adjudicate. Write $execution_root/.resolve/build/preflight.json with either {\"status\":\"clear\"} or {\"status\":\"conflicts\",\"conflicts\":[{\"tasks\":[...],\"question\":\"...\"}]}"
   ];
 
+  // parse_json="true" so the emitted "route" key drives PreflightGate's own
+  // edges (unchanged behavior) while ALSO emitting a flat (non-dotted)
+  // conflict_questions key with the actual human-readable conflict text. See
+  // ForkGate's identical fix in think_like_ken.dot for the full root-cause
+  // writeup: box/hexagon prompt= expansion only ever expands bare, non-dotted
+  // $key tokens via literal string replace -- it never processes ${...} brace
+  // syntax at all, and ${tool.last_output} only ever held this gate's own
+  // routing word ("conflicts"), never the real preflight.json content.
   PreflightGate [
-    shape=parallelogram, goal_gate=true, retry_target="PreflightConflictScan", label="Pre-flight Gate",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/build/preflight.json'));print(d['status'])\""
+    shape=parallelogram, goal_gate=true, retry_target="PreflightConflictScan", label="Pre-flight Gate", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\nd = json.load(open('${execution_root}/.resolve/build/preflight.json'))\nif d['status'] == 'conflicts':\n    lines = [f\\\"- [tasks {c['tasks']}] {c['question']}\\\" for c in d['conflicts']]\n    print(json.dumps({'route': 'conflicts', 'conflict_questions': chr(10).join(lines)}))\nelse:\n    print(json.dumps({'route': 'clear'}))\n\""
   ];
 
   // Batched, not one-question-per-conflict -- matches think-like-ken's own
@@ -122,7 +130,7 @@ digraph build_like_ken {
   PlanConflictEscalation [
     shape=hexagon, mode="freeform",
     label="Plan Conflict Escalation (batched)",
-    prompt="The plan has genuine internal contradictions that only you can resolve -- see ${execution_root}/.resolve/build/preflight.json for the full list. All questions are batched below; answer them together, then this pipeline will exit so the plan can be revised through /plan-like-ken before re-running.\n\n${tool.last_output}"
+    prompt="The plan has genuine internal contradictions that only you can resolve. All questions are batched below; answer them together, then this pipeline will exit so the plan can be revised through /plan-like-ken before re-running.\n\n$conflict_questions"
   ];
 
   // --- Task selection (deterministic; never guesses from conversation memory) ---

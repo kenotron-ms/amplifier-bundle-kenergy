@@ -101,15 +101,32 @@ digraph think_like_ken {
     prompt="Given the context in $execution_root/.resolve/design/context.json and any prior answers in $execution_root/.resolve/design/fork_answers.json (if it exists), list only the OPEN decisions that are genuine personal-preference questions or facts only the user knows -- not engineering questions with a defensible answer. Batch them by topic; never split one topic into micro-decisions. Write $execution_root/.resolve/design/forks.json with {\"has_forks\":true|false,\"forks\":[{\"topic\":\"...\",\"question\":\"...\"}]}"
   ];
 
+  // parse_json="true" so the emitted "route" key drives ForkGate's own edges
+  // (unchanged behavior) while ALSO emitting a flat (non-dotted) fork_questions
+  // key with the actual human-readable question text. This second key exists
+  // because box/hexagon prompt= expansion (_expand_variables in codergen.py,
+  // reused by human.py's _expand_description) only ever expands bare, NON-
+  // DOTTED $key tokens via a literal string replace -- it never processes
+  // ${...} brace syntax at all, for ANY key, dotted or not. A prior fix
+  // assumed ${tool.last_output} just needed the token to exist in context;
+  // that's not the actual bug. The real bug is twofold: (1) tool.last_output
+  // is dotted, so it would never be expanded even as bare $tool.last_output,
+  // and (2) it only ever held ForkGate's own routing word ("has_forks"), never
+  // the real forks.json content -- so even fixing the token form wouldn't
+  // have surfaced the real questions. This was confirmed live: a Resolve
+  // instance parked on this exact node with the literal, unexpanded
+  // "${tool.last_output}" string as its only visible content, and the actual
+  // batched questions were unrecoverable from anywhere in the instance's
+  // exposed state (see incident notes in pipelines/README.md).
   ForkGate [
-    shape=parallelogram, goal_gate=true, retry_target="IdentifyForks", label="Any Forks Remaining?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('has_forks' if json.load(open('${execution_root}/.resolve/design/forks.json'))['has_forks'] else 'no_forks')\""
+    shape=parallelogram, goal_gate=true, retry_target="IdentifyForks", label="Any Forks Remaining?", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\nd = json.load(open('${execution_root}/.resolve/design/forks.json'))\nif d['has_forks']:\n    lines = [f\\\"- [{f['topic']}] {f['question']}\\\" for f in d['forks']]\n    print(json.dumps({'route': 'has_forks', 'fork_questions': chr(10).join(lines)}))\nelse:\n    print(json.dumps({'route': 'no_forks'}))\n\""
   ];
 
   ResolveForks [
     shape=hexagon, mode="freeform",
     label="Resolve Genuine Forks",
-    prompt="These decisions genuinely need you -- either a personal preference or a fact only you know. They're batched by topic below; answer as many as you'd like in one reply.\n\n${tool.last_output}"
+    prompt="These decisions genuinely need you -- either a personal preference or a fact only you know. They're batched by topic below; answer as many as you'd like in one reply.\n\n$fork_questions"
   ];
 
   RecordForkAnswers [
