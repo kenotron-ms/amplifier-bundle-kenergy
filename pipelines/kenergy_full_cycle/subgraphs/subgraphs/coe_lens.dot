@@ -21,12 +21,28 @@ digraph coe_lens {
   Start [shape=Mdiamond, label="Start"];
   Exit  [shape=Msquare,  label="Exit"];
 
+  // Emits coe.findings via report_outcome's context_updates directly --
+  // same missing-writer fix as cosam_lens.dot's CosamReview node.
   CoeReview [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Crusty Old Engineer: What Will This Cost Us Later?",
-    prompt="Read ${decisions_path}. Embody the Crusty Old Engineer: a senior systems engineer who has reviewed too many designs to be impressed, but still cares about correctness. Grounded skepticism, not sarcasm.\n\nFor each decision, question unstated assumptions, identify hidden costs (maintenance, operations, ownership, governance), and call out known failure modes for the problem class. Skepticism alone is insufficient -- you must still answer the question, offer at least one viable way forward, and suggest safer first steps or validation paths.\n\nDeliver: (1) Short framing -- what this problem actually is, stated plainly; (2) Key risks / sharp edges -- concrete, experience-backed points, no fluff; (3) Recommended approach -- how to proceed responsibly, including constraints or sequencing. Anchor claims in real sources when reasonable ones exist (postmortems, SRE literature, canonical incident analyses); if none exist, say so and frame the claim as experiential.\n\nWrite .resolve/design/coe_findings.json with {\"risks\":[...],\"recommended_approach\":\"...\"}. Print the single line: coe_reviewed"
+    prompt="Read $decisions_path. Embody the Crusty Old Engineer: a senior systems engineer who has reviewed too many designs to be impressed, but still cares about correctness. Grounded skepticism, not sarcasm.\n\nFor each decision, question unstated assumptions, identify hidden costs (maintenance, operations, ownership, governance), and call out known failure modes for the problem class. Skepticism alone is insufficient -- you must still answer the question, offer at least one viable way forward, and suggest safer first steps or validation paths.\n\nDeliver: (1) Short framing -- what this problem actually is, stated plainly; (2) Key risks / sharp edges -- concrete, experience-backed points, no fluff; (3) Recommended approach -- how to proceed responsibly, including constraints or sequencing. Anchor claims in real sources when reasonable ones exist (postmortems, SRE literature, canonical incident analyses); if none exist, say so and frame the claim as experiential.\n\nWrite $execution_root/.resolve/design/coe_findings.json with {\"risks\":[...],\"recommended_approach\":\"...\"}\n\nWhen the task above is complete, call the report_outcome tool with status=\"success\" and context_updates={\"coe.findings\": \"<your full (1)-(3) critique text, verbatim>\"}. This is the only requirement here -- no preferred_label is needed (routing is handled by a separate deterministic tool node downstream, not by this field). Do not respond with plain prose as your final action; the tool call itself is what satisfies this gate."
   ];
 
-  Start     -> CoeReview;
-  CoeReview -> Exit;
+  // Deterministic gate: CoeReview's report_outcome context_updates claim is
+  // not proof the critique was actually produced -- confirm the artifact
+  // file it's also required to write has the required keys before exiting.
+  // (There is no deeper observable proxy for "is this critique good" --
+  // that remains the genuine judgment call this lens exists for; this gate
+  // only confirms the well-formed-artifact floor, per the audit's
+  // "verdict artifact with required fields" guidance.)
+  CoeArtifactGate [
+    shape=parallelogram, goal_gate=true, retry_target="CoeReview", label="Coe Findings Artifact Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('${execution_root}/.resolve/design/coe_findings.json'))\n  ok = isinstance(d.get('risks'), list) and isinstance(d.get('recommended_approach'), str) and d['recommended_approach'].strip() != ''\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
+  ];
+
+  Start          -> CoeReview;
+  CoeReview      -> CoeArtifactGate;
+  CoeArtifactGate -> Exit      [condition="context.tool.last_line=ok", weight="2"];
+  CoeArtifactGate -> CoeReview [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=2"];
 }

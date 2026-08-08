@@ -71,6 +71,60 @@ stages:
           if git_root != root:
               raise SystemExit(f"BLOCKED: execution root must be the Git worktree root: {root}")
 
+          # Enforce worktree isolation: the execution root must be a dedicated
+          # feature worktree, never the main checkout, and must not be on the
+          # repo's default branch. This prevents continuous task execution
+          # from ever running (and committing) directly against main/master.
+          current_branch = subprocess.check_output(
+              ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+              text=True,
+          ).strip()
+
+          try:
+              default_branch_ref = subprocess.check_output(
+                  ["git", "-C", str(root), "symbolic-ref", "refs/remotes/origin/HEAD"],
+                  text=True,
+                  stderr=subprocess.DEVNULL,
+              ).strip()
+              default_branch = default_branch_ref.rsplit("/", 1)[-1]
+          except subprocess.CalledProcessError:
+              default_branch = None
+
+          default_branch_candidates = {b for b in {default_branch, "main", "master"} if b}
+          if current_branch in default_branch_candidates:
+              raise SystemExit(
+                  "BLOCKED: execution root's current branch "
+                  f"'{current_branch}' is the repository's default branch; "
+                  "continuous task execution must run on a dedicated feature "
+                  "branch inside an isolated worktree, never main/master"
+              )
+
+          common_git_dir = Path(
+              subprocess.check_output(
+                  ["git", "-C", str(root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                  text=True,
+              ).strip()
+          ).resolve()
+          main_checkout_root = common_git_dir.parent
+
+          worktree_list = subprocess.check_output(
+              ["git", "-C", str(root), "worktree", "list", "--porcelain"],
+              text=True,
+          )
+          worktree_paths = [
+              Path(line.split(" ", 1)[1]).resolve()
+              for line in worktree_list.splitlines()
+              if line.startswith("worktree ")
+          ]
+          is_linked_worktree = root != main_checkout_root and root in worktree_paths
+          if not is_linked_worktree:
+              raise SystemExit(
+                  f"BLOCKED: execution root {root} is not a dedicated linked "
+                  f"Git worktree distinct from the main checkout ({main_checkout_root}); "
+                  "create a feature worktree (e.g. via `git worktree add`) and pass "
+                  "its path as worktree_path instead"
+              )
+
           raw_plan = Path(os.environ["PLAN_PATH"]).expanduser()
           plan = raw_plan.resolve() if raw_plan.is_absolute() else (root / raw_plan).resolve()
           try:

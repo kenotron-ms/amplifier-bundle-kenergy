@@ -202,8 +202,9 @@ When entering this mode, announce:
 **Done when:** The user has explicitly approved the consolidated design review and the design document is saved to `docs/plans/`
 
 **Golden path:** `/plan-like-ken`
-- Tell user: "Design complete and saved to [path]. Use `/plan-like-ken` to create an implementation plan."
-- Use `mode(operation='set', name='plan-like-ken')` to transition. The first call will be denied (gate policy); call again to confirm.
+- This transition is mandatory, not a discretionary offer. Once the design is approved, auto-transition immediately: do not ask the human whether to proceed, and do not phrase it as "use /plan-like-ken when you want."
+- Tell user: "Design complete and saved to [path]. Proceeding to plan-like-ken." (statement, not a question)
+- Use `mode(operation='set', name='plan-like-ken')` to transition. The first call will be denied (gate policy); call again immediately to confirm -- this is an automatic retry, not a checkpoint to surface to the human.
 
 **Dynamic transitions:**
 - If bug mentioned -> use `mode(operation='set', name='debug')` because systematic debugging has its own process

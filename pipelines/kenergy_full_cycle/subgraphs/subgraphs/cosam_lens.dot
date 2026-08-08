@@ -23,12 +23,32 @@ digraph cosam_lens {
   Start [shape=Mdiamond, label="Start"];
   Exit  [shape=Msquare,  label="Exit"];
 
+  // Emits cosam.findings via report_outcome's context_updates directly --
+  // this graph's own header documents cosam.findings as its output, and
+  // think_like_ken.dot's ConsolidatedReview prompt reads ${cosam.findings}
+  // -- but writing .resolve/design/cosam_findings.json alone never promoted
+  // it into context (same missing-writer bug class fixed throughout this
+  // repo's other subgraphs; here resolved via context_updates directly on
+  // the single box node, rather than a separate file-reading tool node,
+  // since there is only one producer node and no downstream file consumer).
   CosamReview [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Cranky Old Sam: Why Does This Exist At All?",
-    prompt="Read ${decisions_path}. Embody Cranky Old Sam: a simplicity zealot, exasperated by unnecessary complexity, calm and warm about things that are actually minimal.\n\nFor every component, abstraction, or layer implied by these decisions, ask: does this justify its existence? What breaks if you remove it? Is this solving a problem you have, or one you might have? The burden of proof is on the complexity.\n\nDeliver: (1) What this actually needs to do -- the problem stripped to its core; (2) What's unnecessary -- specific things that exist without sufficient justification, what happens if removed; (3) The simpler version -- a concrete alternative with fewer parts, not a vague gesture; (4) What stays -- the parts that are actually necessary, acknowledged plainly.\n\nBe specific. 'This is too complex' is not useful; 'this abstraction layer adds indirection but every implementation does the same thing' is useful. Write .resolve/design/cosam_findings.json with {\"unnecessary\":[...],\"simpler_version\":\"...\",\"what_stays\":\"...\"}. Print the single line: cosam_reviewed"
+    prompt="Read $decisions_path. Embody Cranky Old Sam: a simplicity zealot, exasperated by unnecessary complexity, calm and warm about things that are actually minimal.\n\nFor every component, abstraction, or layer implied by these decisions, ask: does this justify its existence? What breaks if you remove it? Is this solving a problem you have, or one you might have? The burden of proof is on the complexity.\n\nDeliver: (1) What this actually needs to do -- the problem stripped to its core; (2) What's unnecessary -- specific things that exist without sufficient justification, what happens if removed; (3) The simpler version -- a concrete alternative with fewer parts, not a vague gesture; (4) What stays -- the parts that are actually necessary, acknowledged plainly.\n\nBe specific. 'This is too complex' is not useful; 'this abstraction layer adds indirection but every implementation does the same thing' is useful. Write $execution_root/.resolve/design/cosam_findings.json with {\"unnecessary\":[...],\"simpler_version\":\"...\",\"what_stays\":\"...\"}\n\nWhen the task above is complete, call the report_outcome tool with status=\"success\" and context_updates={\"cosam.findings\": \"<your full (1)-(4) critique text, verbatim>\"}. This is the only requirement here -- no preferred_label is needed (routing is handled by a separate deterministic tool node downstream, not by this field). Do not respond with plain prose as your final action; the tool call itself is what satisfies this gate."
   ];
 
-  Start       -> CosamReview;
-  CosamReview -> Exit;
+  // Deterministic gate: same pattern as coe_lens.dot's CoeArtifactGate --
+  // confirm the required artifact file has the required keys before exiting.
+  // The critique's substantive quality remains a genuine judgment call (no
+  // deeper observable proxy exists); this only confirms the well-formed-
+  // artifact floor.
+  CosamArtifactGate [
+    shape=parallelogram, goal_gate=true, retry_target="CosamReview", label="Cosam Findings Artifact Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ntry:\n  d=json.load(open('${execution_root}/.resolve/design/cosam_findings.json'))\n  ok = isinstance(d.get('unnecessary'), list) and isinstance(d.get('simpler_version'), str) and d['simpler_version'].strip() != '' and isinstance(d.get('what_stays'), str)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
+  ];
+
+  Start           -> CosamReview;
+  CosamReview     -> CosamArtifactGate;
+  CosamArtifactGate -> Exit        [condition="context.tool.last_line=ok", weight="2"];
+  CosamArtifactGate -> CosamReview [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=2"];
 }

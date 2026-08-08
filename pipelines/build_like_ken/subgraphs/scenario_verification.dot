@@ -27,30 +27,36 @@ digraph scenario_verification {
   // action = what the user is trying to accomplish, outcome = what they can
   // see or confirm. No element references, no selectors.
   WriteScenario [
-    shape=box, goal_gate=true, fidelity="summary:high",
-    label="Write the Scenario (goal language only)",
-    prompt="Task ${task_id} produced a user-facing feature. Write a verification scenario as a named sequence of objective steps. Each step has an Action (what the user is trying to accomplish, in goal language -- \"log in with a test user\", never \"click the button with id X\") and an Observable outcome (a fact the user would notice -- \"the cart reflects one item added\", never \"the .cart-count span shows 1\"). If you find yourself describing page structure, stop and rewrite the step as a goal.\n\nCover at minimum the happy path; add empty/zero-state, error/rejection, or permission-boundary scenarios only if the task's acceptance criteria call for them.\n\nWrite the scenario to .resolve/verify/scenario_${task_id}.md. Print the single line: scenario_written"
+    shape=box, fidelity="summary:high",
+    label="Write the Scenario",
+    prompt="Task $task_id produced a user-facing feature. Write a verification scenario as a named sequence of objective steps. Each step has an Action (what the user is trying to accomplish, in goal language -- \"log in with a test user\", never \"click the button with id X\") and an Observable outcome (a fact the user would notice -- \"the cart reflects one item added\", never \"the .cart-count span shows 1\"). If you find yourself describing page structure, stop and rewrite the step as a goal.\n\nCover at minimum the happy path; add empty/zero-state, error/rejection, or permission-boundary scenarios only if the task's acceptance criteria call for them.\n\nWrite the scenario to $execution_root/.resolve/verify/scenario_$task_id.md"
   ];
 
   // Faithful to the skill's "Execution" section: hand the scenario to a
   // browser agent with NO element hints; failure to achieve a goal is a real
   // finding, not something to paper over.
   RunScenario [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Run the Scenario (no element hints)",
-    prompt="Read the scenario at .resolve/verify/scenario_${task_id}.md. Execute it against the running application using playwright-cli or browser-tester. For each step: attempt to achieve the goal using whatever the UI provides, then report what you observed. Do not describe page elements. If you cannot achieve a goal, that is a FAIL for that step -- report exactly what blocked you, not a workaround.\n\nWrite .resolve/verify/scenario_result_${task_id}.json with {\"result\":\"achieved\"|\"failed\",\"steps\":[{\"action\":\"...\",\"outcome_observed\":\"...\",\"pass\":true|false}]}. Print the single line: scenario_run"
+    prompt="Read the scenario at $execution_root/.resolve/verify/scenario_$task_id.md. Execute it against the running application using playwright-cli or browser-tester. For each step: attempt to achieve the goal using whatever the UI provides, then report what you observed. Do not describe page elements. If you cannot achieve a goal, that is a FAIL for that step -- report exactly what blocked you, not a workaround.\n\nWrite $execution_root/.resolve/verify/scenario_result_$task_id.json with {\"result\":\"achieved\"|\"failed\",\"steps\":[{\"action\":\"...\",\"outcome_observed\":\"...\",\"pass\":true|false}]}"
   ];
 
   // Route on the file the run just wrote -- never on $last_response prose,
-  // per RUBRIC.md's foot-gun #4.
+  // per RUBRIC.md's foot-gun #4. Also writes context.scenario.result /
+  // scenario.report_path directly (parse_json="true"), closing a
+  // missing-writer gap: this graph's own header documents both as its
+  // outputs, and build_like_ken.dot's Reviewer prompt reads
+  // ${scenario.report_path} directly -- but nothing here ever actually set
+  // them (same missing-writer bug class as kenergy_reality_check.dot's
+  // criteria.*/verdict.* keys, build_like_ken.dot's build.verdict, etc.).
   ScenarioGate [
-    shape=parallelogram, label="Scenario Result",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('.resolve/verify/scenario_result_${task_id}.json'))['result'])\""
+    shape=parallelogram, goal_gate=true, retry_target="RunScenario", label="Scenario Result", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nresult=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/verify/scenario_result_${task_id}.json'))['result'])\")\nprintf '{\"route\":\"%s\",\"scenario.result\":\"%s\",\"scenario.report_path\":\"${execution_root}/.resolve/verify/scenario_result_${task_id}.json\"}' \"$result\" \"$result\""
   ];
 
   Start         -> WriteScenario;
   WriteScenario -> RunScenario;
   RunScenario   -> ScenarioGate;
-  ScenarioGate  -> Exit [condition="context.tool.last_line=achieved", weight="2"];
-  ScenarioGate  -> Exit [condition="context.tool.last_line=failed", label="failed -- parent Reviewer will see this in the packet"];
+  ScenarioGate  -> Exit [condition="context.route=achieved", weight="2"];
+  ScenarioGate  -> Exit [condition="context.route=failed", label="failed -- parent Reviewer will see this in the packet"];
 }

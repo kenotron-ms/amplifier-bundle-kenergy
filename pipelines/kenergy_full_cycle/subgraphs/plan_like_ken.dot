@@ -53,36 +53,51 @@ digraph plan_like_ken {
   ];
 
   Start [shape=Mdiamond, label="Start"];
+  // --- Bootstrap: fetch amplifier-bundle-kenergy's scripts/ so downstream
+  // tool_command nodes can shell out to them by an addressable path. Needed
+  // because scripts/*.py never travels with a remotely-fetched .dot file
+  // (materialize_remote_dot only fetches dot_file= targets, never files
+  // referenced only inside a tool_command string), and a tool node's CWD in
+  // some execution environments (e.g. a Resolve worker) is the *target*
+  // workspace repo, not this repo -- so a bare relative "scripts/..." or
+  // "../../scripts/..." path is not reliably resolvable. Idempotent (skips
+  // the clone if already present) so re-running this node, or reaching it
+  // both standalone and nested under kenergy_full_cycle.dot, is harmless.
+  Bootstrap [
+    shape=parallelogram, label="Bootstrap Kenergy Scripts", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
+  ];
   Exit  [shape=Msquare,  label="Exit"];
 
   // Faithful to agents/plan-writer.md's contract: Global Constraints,
   // Interfaces, and the full per-task field set, resolved by engineering
   // judgment -- not negotiated with the human.
   DelegatePlanWriter [
-    shape=box, goal_gate=true, fidelity="full",
-    label="Delegate to kenergy:plan-writer",
-    prompt="Read the approved design at ${design_doc} and repository conventions. Resolve implementation-level details with engineering judgment -- do not ask the human to confirm task breakdown, granularity, ordering, or file decomposition unless the design leaves a fact only they can supply.\n\nWrite docs/plans/<date>-<feature>-implementation.md with: a header (Goal/Architecture/Tech Stack/Verification approach), a '## Global Constraints' block capturing the design's project-wide requirements verbatim, and one '### Task N' section per task, each with non-empty Description/Goal/Specification/Acceptance Criteria/Files/Interfaces (Consumes/Produces)/Model Roles (implementation_model_role, review_model_role, escalated_model_role) and complete, copy-pasteable code -- no '// add your code here' placeholders. Write .resolve/plan/plan_path.txt with the saved path. Print the single line: plan_done"
+    shape=box, fidelity="full",
+    label="Delegate to Plan-Writer",
+    prompt="Read the approved design at $design_doc and repository conventions. Resolve implementation-level details with engineering judgment -- do not ask the human to confirm task breakdown, granularity, ordering, or file decomposition unless the design leaves a fact only they can supply.\n\nWrite $execution_root/docs/plans/<date>-<feature>-implementation.md with: a header (Goal/Architecture/Tech Stack/Verification approach), a '## Global Constraints' block capturing the design's project-wide requirements verbatim, and one '### Task N' section per task, each with non-empty Description/Goal/Specification/Acceptance Criteria/Files/Interfaces (Consumes/Produces)/Model Roles (implementation_model_role, review_model_role, escalated_model_role) and complete, copy-pasteable code -- no '// add your code here' placeholders. Write $execution_root/.resolve/plan/plan_path.txt with the saved path"
   ];
 
   // THE GATE -- never trust "plan_done" as proof the required sections exist.
   ConfirmPlanArtifact [
-    shape=parallelogram, label="Confirm Plan Artifact (evidence gate)",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/confirm_plan_contract.py --plan-path-file .resolve/plan/plan_path.txt"
+    shape=parallelogram, goal_gate=true, retry_target="DelegatePlanWriter", label="Confirm Plan Artifact",
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/confirm_plan_contract.py --plan-path-file ${execution_root}/.resolve/plan/plan_path.txt"
   ];
 
   FixPlanArtifact [
-    shape=box, goal_gate=true, fidelity="full",
-    label="Fix Missing/Malformed Plan Sections",
-    prompt="ConfirmPlanArtifact found this plan does not yet satisfy the required contract: ${tool.last_output}\n\nRe-delegate to kenergy:plan-writer's own contract and fix exactly the named gaps -- do not rewrite unrelated sections. Print the single line: plan_fixed"
+    shape=box, fidelity="full",
+    label="Fix Plan Sections",
+    prompt="ConfirmPlanArtifact found this plan does not yet satisfy the required contract: ${tool.last_output}\n\nRe-delegate to kenergy:plan-writer's own contract and fix exactly the named gaps -- do not rewrite unrelated sections. "
   ];
 
   HandoffToExecution [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Hand Off to Execution",
-    prompt="Plan confirmed at $(cat .resolve/plan/plan_path.txt). Hand off directly to /build-like-ken (or subagent-driven-development.yaml) -- no approval prompt, no 'does this look right?' checkpoint. Print the single line: handed_off"
+    prompt="Plan confirmed at $(cat $execution_root/.resolve/plan/plan_path.txt). Hand off directly to /build-like-ken (or subagent-driven-development.yaml) -- no approval prompt, no 'does this look right?' checkpoint. "
   ];
 
-  Start                -> DelegatePlanWriter;
+  Start                     -> Bootstrap;
+  Bootstrap                 -> DelegatePlanWriter;
   DelegatePlanWriter    -> ConfirmPlanArtifact;
   ConfirmPlanArtifact   -> HandoffToExecution [condition="context.tool.last_line=contract_satisfied", weight="2"];
   ConfirmPlanArtifact   -> FixPlanArtifact    [condition="context.tool.last_line=contract_violated"];

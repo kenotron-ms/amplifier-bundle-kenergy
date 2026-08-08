@@ -151,3 +151,45 @@ Python-in-YAML logic already proven in `recipes/single-task-pipeline.yaml`,
 `recipes/subagent-driven-development.yaml`, and `recipes/finish-branch.yaml`.
 Porting that logic into standalone scripts callable from these `.dot` files
 is the next real step before these pipelines can actually run end to end.
+
+## Bootstrap node: how `scripts/*.py` is found at runtime
+
+Every entry-point graph that shells out to `scripts/*.py` (`build_like_ken.dot`,
+`verify.dot`, `plan_like_ken.dot`, `finish.dot`, `think_like_ken.dot`, and
+their duplicated copies under `kenergy_full_cycle/subgraphs/`) starts with a
+`Bootstrap` node immediately after `Start`, before any node that references
+`${kenergy_root}/scripts/...`.
+
+This exists because `scripts/*.py` is **not guaranteed to be present next to
+the running `.dot` file** in every execution environment:
+
+- When a `.dot` is fetched via the `git+https://owner/repo@ref#path.dot`
+  pipeline-source scheme, only `dot_file=` targets are walked and fetched
+  (`materialize_remote_dot` / `extract_dot_file_refs` is DOT-attribute-aware
+  only -- it never inspects `tool_command` strings). `scripts/*.py` is never
+  discovered or fetched this way.
+- A tool node's working directory is not always this repo's root. Under
+  Amplifier Resolve, for example, a tool node's CWD is the *target* workspace
+  repo being worked on, not the repo the pipeline definition came from -- so a
+  bare `scripts/foo.py` or `../../scripts/foo.py` reference resolves against
+  the wrong tree (or nowhere) and fails closed on the very first `goal_gate`.
+
+`Bootstrap` closes that gap by shallow-cloning this repo at `$kenergy_ref`
+(context input, defaults to `main`) into `/tmp/kenergy-$kenergy_ref` and
+emitting `{"kenergy_root": "..."}` via `parse_json="true"`. It is idempotent
+(skips the clone if the directory already exists), so it's harmless to run
+it every time a standalone entry graph is invoked, even when that graph is
+also reachable as a nested subgraph under `kenergy_full_cycle.dot` (whose own
+`Bootstrap` node would otherwise have already set `kenergy_root` for it via
+the standard folder-node context clone).
+
+Every downstream `tool_command` that used to read `../../scripts/foo.py` now
+reads `${kenergy_root}/scripts/foo.py` instead.
+
+**Known gap, not yet fixed upstream:** this is a workaround for a real hole
+in the attractor engine's remote-pipeline contract -- there is no mechanism
+today for a remote `git+https://` pipeline to declare non-`.dot` companion
+assets, and no `context.pipeline_dir`-style key a tool node could use to
+address the directory its own `.dot` file was fetched into. Worth filing
+against `amplifier-bundle-attractor` if/when this becomes a recurring need
+for other pipeline authors, not just kenergy.

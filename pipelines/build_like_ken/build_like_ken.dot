@@ -48,6 +48,15 @@
 // Context inputs:
 //   $plan_path        - absolute path to the implementation plan
 //   $execution_root    - worktree/repo root all tasks execute inside
+//   $kenergy_ref       - (optional) git ref of amplifier-bundle-kenergy to
+//                        bootstrap scripts/ from; defaults to "main". Needed
+//                        because this graph's tool_command nodes shell out to
+//                        scripts/*.py, which do not travel with a remotely
+//                        fetched .dot file (materialize_remote_dot only
+//                        fetches dot_file= targets) and are not guaranteed to
+//                        be present on a tool node's CWD in every execution
+//                        environment (e.g. a Resolve worker's CWD is the
+//                        *target* workspace repo, not this repo).
 //
 // Context outputs:
 //   build.verdict           - "all_tasks_complete" | "blocked"
@@ -65,28 +74,47 @@ digraph build_like_ken {
   ];
 
   Start [shape=Mdiamond, label="Start"];
+  // --- Bootstrap: fetch amplifier-bundle-kenergy's scripts/ so downstream
+  // tool_command nodes can shell out to them by an addressable path. Needed
+  // because scripts/*.py never travels with a remotely-fetched .dot file
+  // (materialize_remote_dot only fetches dot_file= targets, never files
+  // referenced only inside a tool_command string), and a tool node's CWD in
+  // some execution environments (e.g. a Resolve worker) is the *target*
+  // workspace repo, not this repo -- so a bare relative "scripts/..." or
+  // "../../scripts/..." path is not reliably resolvable. Idempotent (skips
+  // the clone if already present) so re-running this node, or reaching it
+  // both standalone and nested under kenergy_full_cycle.dot, is harmless.
+  Bootstrap [
+    shape=parallelogram, label="Bootstrap Kenergy Scripts", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
+  ];
   Exit  [shape=Msquare,  label="Exit"];
 
   // --- Plan-scoped state guard (recipes/subagent-driven-development.yaml's
   // ledger-identity invariant, rendered as a gate) ---
+  // Emits its own resolved ledger_path as a flat JSON key (parse_json="true")
+  // rather than a local shell variable -- $LEDGER_PATH previously existed only
+  // inside THIS node's own subshell and was never actually visible to any
+  // downstream node (NextTask, CheckRound, WriteLedger all referenced it as
+  // if it were shared context; it was always empty for them). See
+  // scripts/next_task.py's header note for the full sharp-edge writeup.
   ValidateLedgerIdentity [
-    shape=parallelogram, label="Validate Ledger Identity",
-    tool_command="#!/bin/sh\nset -e\nmkdir -p \"$(dirname \"$LEDGER_PATH\")\"\nfirst=\"# Plan: $PLAN_PATH\"\nif [ -f \"$LEDGER_PATH\" ]; then\n  actual=$(head -n1 \"$LEDGER_PATH\")\n  if [ \"$actual\" != \"$first\" ]; then printf 'identity_mismatch'; exit 0; fi\nelse\n  printf '%s\\n\\n## Completed Tasks\\n\\n## Parked Findings\\n' \"$first\" > \"$LEDGER_PATH\"\nfi\nprintf 'identity_ok'",
-    env="PLAN_PATH=$plan_path,LEDGER_PATH=$execution_root/.kenergy/sdd/ledger.md"
+    shape=parallelogram, label="Validate Ledger Identity", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nLEDGER_PATH=\"${execution_root}/.kenergy/sdd/ledger.md\"\nmkdir -p \"$(dirname \"$LEDGER_PATH\")\"\nfirst=\"# Plan: ${plan_path}\"\nif [ -f \"$LEDGER_PATH\" ]; then\n  actual=$(head -n1 \"$LEDGER_PATH\")\n  if [ \"$actual\" != \"$first\" ]; then printf '{\"route\":\"identity_mismatch\"}'; exit 0; fi\nelse\n  printf '%s\\n\\n## Completed Tasks\\n\\n## Parked Findings\\n' \"$first\" > \"$LEDGER_PATH\"\nfi\nprintf '{\"route\":\"identity_ok\",\"ledger_path\":\"%s\"}' \"$LEDGER_PATH\""
   ];
 
   // --- One-shot pre-flight scan for whole-plan contradictions (Task 4's
   // pre-flight-conflict-scan step, rendered as a gate; box node emits JSON,
   // parallelogram routes on the file, not on prose) ---
   PreflightConflictScan [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Pre-flight Conflict Scan",
-    prompt="Read $plan_path in full, once. Scan every task for contradictions against each other, against the plan's Global Constraints, or against a mandate the merged reviewer would necessarily reject (e.g. two tasks pinning incompatible versions of the same dependency). Do NOT flag stylistic disagreements or things a reasonable engineer would resolve unassisted -- only genuine, unresolvable contradictions that only a human can adjudicate. Write .resolve/build/preflight.json with either {\"status\":\"clear\"} or {\"status\":\"conflicts\",\"conflicts\":[{\"tasks\":[...],\"question\":\"...\"}]}. Print the single line: preflight_scanned"
+    prompt="Read $plan_path in full, once. Scan every task for contradictions against each other, against the plan's Global Constraints, or against a mandate the merged reviewer would necessarily reject (e.g. two tasks pinning incompatible versions of the same dependency). Do NOT flag stylistic disagreements or things a reasonable engineer would resolve unassisted -- only genuine, unresolvable contradictions that only a human can adjudicate. Write $execution_root/.resolve/build/preflight.json with either {\"status\":\"clear\"} or {\"status\":\"conflicts\",\"conflicts\":[{\"tasks\":[...],\"question\":\"...\"}]}"
   ];
 
   PreflightGate [
-    shape=parallelogram, label="Pre-flight Gate",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('.resolve/build/preflight.json'));print(d['status'])\""
+    shape=parallelogram, goal_gate=true, retry_target="PreflightConflictScan", label="Pre-flight Gate",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/build/preflight.json'));print(d['status'])\""
   ];
 
   // Batched, not one-question-per-conflict -- matches think-like-ken's own
@@ -94,36 +122,62 @@ digraph build_like_ken {
   PlanConflictEscalation [
     shape=hexagon, mode="freeform",
     label="Plan Conflict Escalation (batched)",
-    prompt="The plan has genuine internal contradictions that only you can resolve -- see .resolve/build/preflight.json for the full list. All questions are batched below; answer them together, then this pipeline will exit so the plan can be revised through /plan-like-ken before re-running.\n\n${tool.last_output}"
+    prompt="The plan has genuine internal contradictions that only you can resolve -- see ${execution_root}/.resolve/build/preflight.json for the full list. All questions are batched below; answer them together, then this pipeline will exit so the plan can be revised through /plan-like-ken before re-running.\n\n${tool.last_output}"
   ];
 
   // --- Task selection (deterministic; never guesses from conversation memory) ---
   NextTask [
-    shape=parallelogram, label="Next Incomplete Task?",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/next_task.py --plan \"$PLAN_PATH\" --ledger \"$LEDGER_PATH\""
+    shape=parallelogram, label="Next Incomplete Task?", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/next_task.py --plan \"${plan_path}\" --ledger \"${ledger_path}\""
   ];
 
   // --- kenergy skill, pre-work mode: define verified-success criteria BEFORE
   // dispatching the implementer, per skills/kenergy/SKILL.md's "Pre-Work:
   // Define the Verification Criteria" behavior ---
+  // `inputs=` is not a real engine attribute (PipelineHandler.execute() never
+  // reads it) -- it was silently a no-op. The correct mechanism: a folder
+  // node's child context starts as a full clone of the PARENT's context
+  // (handlers/pipeline.py step 6), so task_id/task_description already flow
+  // through automatically (they are flat, non-dotted keys in this context
+  // by the time NextTask's parse_json="true" JSON object sets them) -- no
+  // injection attribute is needed for them. Only $mode is genuinely new
+  // here (kenergy_reality_check.dot's pre-work path reads it) and is a
+  // static literal, not a per-run substitution -- context.<key> attrs are
+  // NOT expanded by the engine (only prompt/tool_command/description/
+  // tool_env are, per SUBSTITUTABLE_ATTRS), so only literal values belong
+  // in a context.<key>="..." folder attribute; a "${...}" token there would
+  // be injected into the child verbatim as that literal string.
   DefineTaskCriteria [
-    shape=folder, label="Define Task Criteria (kenergy skill, pre-work)",
+    shape=folder, label="Define Task Criteria (pre-work)",
     dot_file="subgraphs/kenergy_reality_check.dot",
-    inputs="task_id,task_description",
+    context.mode="pre_work",
     outputs="criteria.working_definition,criteria.minimum_proof,criteria.verification_level"
   ];
 
   SaveTaskState [
     shape=parallelogram, label="Save Task Brief + Base SHA",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/save_task_state.py --task \"$TASK_ID\" --state-dir \"$STATE_DIR\""
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/save_task_state.py --task \"${task_id}\" --state-dir \"${state_dir}\" --goal \"${task_goal}\" --description \"${task_description}\" --spec \"${task_spec}\" --acceptance \"${task_acceptance}\" --interfaces \"${task_interfaces}\" --files \"${task_files}\""
   ];
 
   // Faithful to agents/implementer.md and vdd-walkthrough.md's "Initial
   // implementer" call shape.
   Implement [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Implementer (VDD, not TDD)",
-    prompt="IMPLEMENT ONE TASK\n\nEXECUTION ROOT: ${execution_root}\n\nTASK GOAL\n=========\nTask ID: ${task_id}\nGoal: ${task_goal}\nSpecification: ${task_spec}\nAcceptance Criteria: ${task_acceptance}\nInterfaces: ${task_interfaces}\n\nMinimum proof required (from kenergy pre-work criteria): ${criteria.minimum_proof}\n\nImplement exactly this task and nothing else -- no unrequested scope. Run the task's exact static analysis command first, fix any pre-existing issue it surfaces, then implement. Run static analysis again, then verify with REAL execution at the level the plan specifies -- if it says curl, curl it; if it says browser, open the browser; if it's a script, run it. Do not substitute a unit test for non-library code. Document the actual output you saw. Commit atomically. Write .resolve/build/impl_${task_id}.json with {\"status\":\"DONE\"|\"DONE_WITH_CONCERNS\"|\"NEEDS_CONTEXT\"|\"BLOCKED\", \"commit_sha\":\"...\", \"verification_level\":\"static|script|http|browser|dtu\", \"concerns\":\"...\"}. Print the single line: implement_done"
+    prompt="IMPLEMENT ONE TASK\n\nEXECUTION ROOT: $execution_root\n\nTASK GOAL\n=========\nTask ID: $task_id\nGoal: $task_goal\nSpecification: $task_spec\nAcceptance Criteria: $task_acceptance\nInterfaces: $task_interfaces\n\nMinimum proof required (from kenergy pre-work criteria): ${criteria.minimum_proof}\n\nImplement exactly this task and nothing else -- no unrequested scope. Run the task's exact static analysis command first, fix any pre-existing issue it surfaces, then implement. Run static analysis again, then verify with REAL execution at the level the plan specifies -- if it says curl, curl it; if it says browser, open the browser; if it's a script, run it. Do not substitute a unit test for non-library code. Document the actual output you saw. Commit atomically. Write $execution_root/.resolve/build/impl_$task_id.json with {\"status\":\"DONE\"|\"DONE_WITH_CONCERNS\"|\"NEEDS_CONTEXT\"|\"BLOCKED\", \"commit_sha\":\"...\", \"verification_level\":\"static|script|http|browser|dtu\", \"concerns\":\"...\"}"
+  ];
+
+  // Deterministic gate (added per the goal_gate self-report audit): confirm
+  // Implement's report_outcome "implement_done" claim is backed by a real,
+  // well-formed impl_${task_id}.json AND (when status claims work landed) a
+  // commit_sha that actually resolves in git -- never trust the box node's
+  // own claim that it wrote the file and committed. Mirrors
+  // ConfirmVerdictAgainstRepo's downstream commit-sha check, applied one
+  // step earlier so a malformed/missing artifact never even reaches
+  // RouteVerificationLevel.
+  ImplementArtifactGate [
+    shape=parallelogram, goal_gate=true, retry_target="Implement", label="Implement Artifact Well-Formed?",
+    tool_command="#!/bin/sh\nset -e\nf=\"${execution_root}/.resolve/build/impl_${task_id}.json\"\nstatus=$(python3 -c \"import json;print(json.load(open('$f')).get('status',''))\" 2>/dev/null || echo '')\nsha=$(python3 -c \"import json;print(json.load(open('$f')).get('commit_sha',''))\" 2>/dev/null || echo '')\ncase \"$status\" in\n  DONE|DONE_WITH_CONCERNS)\n    if [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then printf 'ok'; else printf 'missing'; fi\n    ;;\n  NEEDS_CONTEXT|BLOCKED)\n    printf 'ok'\n    ;;\n  *)\n    printf 'missing'\n    ;;\nesac"
   ];
 
   // --- Verification-level router: reads the FILE the implementer just wrote
@@ -132,36 +186,45 @@ digraph build_like_ken {
   // the review packet already contains the right kind of proof. ---
   RouteVerificationLevel [
     shape=parallelogram, label="Route on Declared Verification Level",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('.resolve/build/impl_${task_id}.json'))['verification_level'])\""
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('${execution_root}/.resolve/build/impl_${task_id}.json'))['verification_level'])\""
   ];
 
+  // `inputs=` removed (inert, see DefineTaskCriteria's note above) --
+  // task_id already flows into the child via the automatic context clone.
   ScenarioVerificationGate [
-    shape=folder, label="Scenario Verification (UI/integration flows)",
+    shape=folder, label="Scenario Verification (UI)",
     dot_file="subgraphs/scenario_verification.dot",
-    inputs="task_id",
     outputs="scenario.result,scenario.report_path"
   ];
 
   IntegrationTestingGate [
-    shape=folder, label="Integration Testing Discipline (long-running E2E)",
+    shape=folder, label="Integration Testing (E2E)",
     dot_file="subgraphs/integration_testing_gate.dot",
-    inputs="task_id",
     outputs="integration.result,integration.report_path"
   ];
 
   // --- Review packet built from base SHA through current HEAD -- never from
   // conversation memory, per RUBRIC.md's route-on-evidence doctrine. ---
+  // Engine ${key} substitution is greedy inside braces -- a literal
+  // "${round:-1}" bash-default idiom would be mis-parsed as the single
+  // context key "round:-1" (never found, left as a literal, dollar-brace
+  // and all) rather than shell-defaulting at runtime. On this node's very
+  // first invocation for a task (the RouteVerificationLevel -> ... ->
+  // BuildReviewPackage path runs before CheckRound ever executes),
+  // ${round} is genuinely absent from context, so it must default via a
+  // real shell default on the ROUND env var instead -- exposed with
+  // tool_env, never referenced as a bare ${round} substitution token here.
   BuildReviewPackage [
-    shape=parallelogram, label="Build Review Package",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/build_review_package.py --task \"$TASK_ID\" --state-dir \"$STATE_DIR\" --round \"$ROUND\""
+    shape=parallelogram, label="Build Review Package", tool_env="round",
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/build_review_package.py --task \"${task_id}\" --state-dir \"${state_dir}\" --round \"${ROUND:-1}\""
   ];
 
   // Faithful to agents/reviewer.md: one merged three-axis reviewer, not a
   // split verify/quality pair. Requires TASK GOAL + REVIEW PACKAGE or refuses.
   Reviewer [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Reviewer (spec/goal, quality, verification -- one verdict)",
-    prompt="TASK GOAL\n=========\nTask ID: ${task_id}\nGoal: ${task_goal}\nSpecification: ${task_spec}\nAcceptance Criteria: ${task_acceptance}\nInterfaces: ${task_interfaces}\n\nREVIEW PACKAGE\n==============\n${review_package}\n\nAdditional evidence, if gathered: ${scenario.report_path} ${integration.report_path}\n\nIf TASK GOAL or REVIEW PACKAGE is missing, refuse: write .resolve/review/verdict.json with {\"verdict\":\"refused\",\"missing\":\"task_goal\"|\"review_package\"} and stop.\n\nOtherwise review three axes in one pass: (1) Spec/Goal Compliance -- every requested behavior present, nothing unrequested added; (2) Quality -- correctness, clarity, error handling, no speculative complexity; (3) Verification Adequacy -- apply the falsifiability test: name one production change that would make the claimed check fail. Grep and string-presence checks prove documentation cleanup, not runtime behavior -- reject them as sole evidence for behavioral claims. Tag every finding LOAD-BEARING or ADVISORY. Write .resolve/review/verdict.json with {\"verdict\":\"pass\"|\"fail\",\"commit_sha\":\"<the sha you reviewed>\",\"findings\":[{\"severity\":\"load-bearing\"|\"advisory\",\"detail\":\"...\"}]}. Print the single line: review_done"
+    prompt="TASK GOAL\n=========\nTask ID: $task_id\nGoal: $task_goal\nSpecification: $task_spec\nAcceptance Criteria: $task_acceptance\nInterfaces: $task_interfaces\n\nREVIEW PACKAGE\n==============\n$review_package\n\nAdditional evidence, if gathered: ${scenario.report_path} ${integration.report_path}\n\nIf TASK GOAL or REVIEW PACKAGE is missing, refuse: write $execution_root/.resolve/review/verdict.json with {\"verdict\":\"refused\",\"missing\":\"task_goal\"|\"review_package\"} and stop.\n\nOtherwise review three axes in one pass: (1) Spec/Goal Compliance -- every requested behavior present, nothing unrequested added; (2) Quality -- correctness, clarity, error handling, no speculative complexity; (3) Verification Adequacy -- apply the falsifiability test: name one production change that would make the claimed check fail. Grep and string-presence checks prove documentation cleanup, not runtime behavior -- reject them as sole evidence for behavioral claims. Tag every finding LOAD-BEARING or ADVISORY. Write $execution_root/.resolve/review/verdict.json with {\"verdict\":\"pass\"|\"fail\",\"commit_sha\":\"<the sha you reviewed>\",\"findings\":[{\"severity\":\"load-bearing\"|\"advisory\",\"detail\":\"...\"}]}"
   ];
 
   // --- THE GATE. Self-reported-claims-not-evidence, per RUBRIC.md §2: a box
@@ -169,82 +232,108 @@ digraph build_like_ken {
   // real state. Independently re-derive the verdict from the file, and
   // independently confirm the commit sha it names is real git history --
   // never trust that both things happened just because the node said so. ---
+  // Emits outcome="PASS" alongside the routing token when confirmed, so
+  // WriteLedger's ${outcome} substitution token has a real value on the
+  // ConfirmVerdictAgainstRepo->WriteLedger path (write_ledger.py refuses
+  // any outcome outside {PASS, APPROVED_WITH_PARKED} -- see write_ledger.py).
   ConfirmVerdictAgainstRepo [
-    shape=parallelogram, label="Confirm Verdict Against Repo (evidence gate)",
-    tool_command="#!/bin/sh\nset -e\nverdict=$(python3 -c \"import json;d=json.load(open('.resolve/review/verdict.json'));print(d.get('verdict','fail'))\" 2>/dev/null || echo fail)\nsha=$(python3 -c \"import json;d=json.load(open('.resolve/review/verdict.json'));print(d.get('commit_sha',''))\" 2>/dev/null || echo '')\nif [ \"$verdict\" = \"pass\" ] && [ -n \"$sha\" ] && git -C \"$EXECUTION_ROOT\" cat-file -e \"$sha\" 2>/dev/null; then\n  printf 'confirmed_pass'\nelse\n  printf 'unconfirmed_or_fail'\nfi",
-    env="EXECUTION_ROOT=$execution_root"
+    shape=parallelogram, goal_gate=true, retry_target="Reviewer", label="Confirm Verdict Against Repo (evidence gate)", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nverdict=$(python3 -c \"import json;d=json.load(open('${execution_root}/.resolve/review/verdict.json'));print(d.get('verdict','fail'))\" 2>/dev/null || echo fail)\nsha=$(python3 -c \"import json;d=json.load(open('${execution_root}/.resolve/review/verdict.json'));print(d.get('commit_sha',''))\" 2>/dev/null || echo '')\nif [ \"$verdict\" = \"pass\" ] && [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then\n  printf '{\"route\":\"confirmed_pass\",\"outcome\":\"PASS\"}'\nelse\n  printf '{\"route\":\"unconfirmed_or_fail\"}'\nfi"
   ];
 
   // --- Bound: five fixes, six reviews. Round counter is a decision point,
   // not a fuse (docs/primer.md doctrine #5). ---
   CheckRound [
-    shape=parallelogram, label="Which Round?",
-    tool_command="#!/bin/sh\nset -e\ncount=$(python3 scripts/bump_round.py --state-dir \"$STATE_DIR\" --task \"$TASK_ID\")\nif   [ \"$count\" -le 3 ]; then printf 'resume'\nelif [ \"$count\" -le 5 ]; then printf 'escalate'\nelse printf 'adjudicate'\nfi"
+    shape=parallelogram, label="Which Round?", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/bump_round.py --state-dir \"${state_dir}\" --task \"${task_id}\""
   ];
 
   // Rounds 1-3: resume the ORIGINAL implementer session -- preserves working
   // context, per vdd-walkthrough.md's "do not start a replacement implementer
   // in this case."
   ResumeFix [
-    shape=box, goal_gate=true, fidelity="full",
-    label="Resume Original Implementer (rounds 1-3)",
-    prompt="Resume session ${implementer_session_id}. Fix only the LOAD-BEARING findings in this review, using this precomputed packet instead of re-running git discovery.\n\nREVIEW FINDINGS:\n${review_findings}\n\nREVIEW PACKAGE:\n${review_package}\n\nRerun the task's exact verification, commit, and update .resolve/build/impl_${task_id}.json with the new commit_sha. Print the single line: fix_done"
+    shape=box, fidelity="full",
+    label="Resume Implementer (rounds 1-3)",
+    prompt="Resume session $implementer_session_id. Fix only the LOAD-BEARING findings in this review, using this precomputed packet instead of re-running git discovery.\n\nREVIEW FINDINGS:\n$review_findings\n\nREVIEW PACKAGE:\n$review_package\n\nRerun the task's exact verification, commit, and update $execution_root/.resolve/build/impl_$task_id.json with the new commit_sha. "
   ];
 
   // Rounds 4-5: fresh, stronger implementer -- the original session's budget
   // for this task is exhausted.
   EscalateFix [
-    shape=box, goal_gate=true, fidelity="full",
-    label="Fresh Escalated Implementer (rounds 4-5)",
-    prompt="FRESH ESCALATED REVIEW FIX\n\nTASK GOAL: ${task_goal}\n\nREVIEW PACKAGE:\n${review_package}\n\nOPEN FINDINGS:\n${review_findings}\n\nFix only the open LOAD-BEARING findings -- no scope expansion. Run static analysis and the exact VDD verification, commit once, and update .resolve/build/impl_${task_id}.json with the new commit_sha. Print the single line: fix_done"
+    shape=box, fidelity="full",
+    label="Escalated Implementer (rounds 4-5)",
+    prompt="FRESH ESCALATED REVIEW FIX\n\nTASK GOAL: $task_goal\n\nREVIEW PACKAGE:\n$review_package\n\nOPEN FINDINGS:\n$review_findings\n\nFix only the open LOAD-BEARING findings -- no scope expansion. Run static analysis and the exact VDD verification, commit once, and update $execution_root/.resolve/build/impl_$task_id.json with the new commit_sha. "
   ];
 
   // Round 6: adjudication only. Never a seventh fix.
   Adjudicate [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Cap Adjudication (round 6, no further fix)",
-    prompt="Read the final review verdict at .resolve/review/verdict.json. If no LOAD-BEARING finding remains, write .resolve/build/adjudication.json with {\"outcome\":\"approved_with_parked\",\"parked\":[{\"detail\":\"...\",\"reason\":\"non-load-bearing after bounded review\"}]}. If any LOAD-BEARING finding remains, write {\"outcome\":\"blocked\",\"blocker\":\"...\"}. There is no further fix attempt regardless of outcome. Print the single line: adjudicated"
+    prompt="Read the final review verdict at $execution_root/.resolve/review/verdict.json. If no LOAD-BEARING finding remains, write $execution_root/.resolve/build/adjudication.json with {\"outcome\":\"approved_with_parked\",\"parked\":[{\"detail\":\"...\",\"reason\":\"non-load-bearing after bounded review\"}]}. If any LOAD-BEARING finding remains, write {\"outcome\":\"blocked\",\"blocker\":\"...\"}. There is no further fix attempt regardless of outcome"
   ];
 
+  // Emits outcome="APPROVED_WITH_PARKED" alongside the routing token on the
+  // approved_with_parked path, so WriteLedger's ${outcome} token has a real
+  // value on the Adjudicate->AdjudicationGate->WriteLedger path too (mirrors
+  // ConfirmVerdictAgainstRepo's own outcome emission above).
   AdjudicationGate [
-    shape=parallelogram, label="Adjudication Outcome",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.load(open('.resolve/build/adjudication.json'))['outcome'])\""
+    shape=parallelogram, goal_gate=true, retry_target="Adjudicate", label="Adjudication Outcome", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/build/adjudication.json'));o=d['outcome'];print('{\\\"route\\\":\\\"approved_with_parked\\\",\\\"outcome\\\":\\\"APPROVED_WITH_PARKED\\\"}' if o=='approved_with_parked' else '{\\\"route\\\":\\\"blocked\\\"}')\""
   ];
 
   // --- Ledger write happens ONLY after ConfirmVerdictAgainstRepo or a clean
   // adjudication -- never from an unconfirmed reviewer claim. ---
   WriteLedger [
     shape=parallelogram, label="Write Ledger Entry",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/write_ledger.py --state-dir \"$STATE_DIR\" --task \"$TASK_ID\" --outcome \"$OUTCOME\"\nprintf 'ledger_written'"
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/write_ledger.py --state-dir \"${state_dir}\" --task \"${task_id}\" --outcome \"${outcome}\"\nprintf 'ledger_written'"
+  ];
+
+  // THE MISSING WRITER (a real, silent sharp edge): this graph's own header
+  // documents build.verdict / build.tasks_completed / build.blocked_task_id
+  // as context outputs, and both Report below and the parent
+  // kenergy_full_cycle.dot's CheckBuildVerdict gate read them -- but no node
+  // ever wrote them. scripts/compute_build_verdict.py closes that gap,
+  // reading the same ledger.md this loop already maintains.
+  ComputeBuildVerdictBlocked [
+    shape=parallelogram, label="Build Verdict (blocked)", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/compute_build_verdict.py --ledger \"${ledger_path}\" --blocked-task \"${task_id}\""
   ];
 
   Blocked [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Report Blocked Task",
-    prompt="Task ${task_id} is BLOCKED after the bounded remediation loop. State the exact blocker from .resolve/build/adjudication.json. Do not write a ledger completion entry. Print the single line: blocked_reported"
+    prompt="Task $task_id is BLOCKED after the bounded remediation loop. State the exact blocker from $execution_root/.resolve/build/adjudication.json. Do not write a ledger completion entry. "
+  ];
+
+  ComputeBuildVerdictComplete [
+    shape=parallelogram, label="Build Verdict (complete)", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/compute_build_verdict.py --ledger \"${ledger_path}\""
   ];
 
   Report [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Report",
-    prompt="Summarize: ${build.tasks_completed} tasks accepted, verdict ${build.verdict}. If blocked, name the exact blocking task and reason. Print the single line: reported"
+    prompt="Summarize: ${build.tasks_completed} tasks accepted, verdict ${build.verdict}. If blocked, name the exact blocking task and reason. "
   ];
 
-  Start                    -> ValidateLedgerIdentity;
-  ValidateLedgerIdentity    -> Exit                  [condition="context.tool.last_line=identity_mismatch", label="BLOCKED: cross-plan state"];
-  ValidateLedgerIdentity    -> PreflightConflictScan  [condition="context.tool.last_line=identity_ok", weight="2"];
+  Start                     -> Bootstrap;
+  Bootstrap                 -> ValidateLedgerIdentity;
+  ValidateLedgerIdentity    -> Exit                  [condition="context.route=identity_mismatch", label="BLOCKED: cross-plan state"];
+  ValidateLedgerIdentity    -> PreflightConflictScan  [condition="context.route=identity_ok", weight="2"];
   PreflightConflictScan     -> PreflightGate;
   PreflightGate             -> NextTask               [condition="context.tool.last_line=clear", weight="2"];
   PreflightGate             -> PlanConflictEscalation [condition="context.tool.last_line=conflicts"];
   PlanConflictEscalation    -> Exit                   [label="revise plan via /plan-like-ken, then re-run"];
 
-  NextTask                  -> DefineTaskCriteria     [condition="context.tool.last_line=has_task", weight="2"];
-  NextTask                  -> Report                 [condition="context.tool.last_line=no_tasks"];
+  NextTask                  -> DefineTaskCriteria     [condition="context.route=has_task", weight="2"];
+  NextTask                  -> ComputeBuildVerdictComplete [condition="context.route=no_tasks"];
+  ComputeBuildVerdictComplete -> Report;
 
   DefineTaskCriteria        -> SaveTaskState;
   SaveTaskState             -> Implement;
-  Implement                 -> RouteVerificationLevel;
-
+  Implement                 -> ImplementArtifactGate;
+  ImplementArtifactGate      -> RouteVerificationLevel [condition="context.tool.last_line=ok", weight="2"];
+  ImplementArtifactGate      -> Implement               [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact missing/malformed or commit_sha does not resolve, bounded by default_max_retry=2"];
   RouteVerificationLevel    -> ScenarioVerificationGate  [condition="context.tool.last_line=browser"];
   RouteVerificationLevel    -> IntegrationTestingGate    [condition="context.tool.last_line=dtu"];
   RouteVerificationLevel    -> BuildReviewPackage        [condition="context.tool.last_line=static", weight="2"];
@@ -255,20 +344,19 @@ digraph build_like_ken {
 
   BuildReviewPackage        -> Reviewer;
   Reviewer                  -> ConfirmVerdictAgainstRepo;
+  ConfirmVerdictAgainstRepo -> WriteLedger  [condition="context.route=confirmed_pass", weight="2"];
+  ConfirmVerdictAgainstRepo -> CheckRound   [condition="context.route=unconfirmed_or_fail"];
 
-  ConfirmVerdictAgainstRepo -> WriteLedger  [condition="context.tool.last_line=confirmed_pass", weight="2"];
-  ConfirmVerdictAgainstRepo -> CheckRound   [condition="context.tool.last_line=unconfirmed_or_fail"];
-
-  CheckRound                -> ResumeFix    [condition="context.tool.last_line=resume"];
-  CheckRound                -> EscalateFix  [condition="context.tool.last_line=escalate"];
-  CheckRound                -> Adjudicate   [condition="context.tool.last_line=adjudicate"];
+  CheckRound                -> ResumeFix    [condition="context.route=resume"];
+  CheckRound                -> EscalateFix  [condition="context.route=escalate"];
+  CheckRound                -> Adjudicate   [condition="context.route=adjudicate"];
 
   ResumeFix                 -> BuildReviewPackage [loop_restart="true", label="re-review"];
   EscalateFix                -> BuildReviewPackage [loop_restart="true", label="re-review"];
-
   Adjudicate                 -> AdjudicationGate;
-  AdjudicationGate           -> WriteLedger [condition="context.tool.last_line=approved_with_parked", weight="2"];
-  AdjudicationGate           -> Blocked     [condition="context.tool.last_line=blocked"];
+  AdjudicationGate           -> WriteLedger [condition="context.route=approved_with_parked", weight="2"];
+  AdjudicationGate           -> ComputeBuildVerdictBlocked [condition="context.route=blocked"];
+  ComputeBuildVerdictBlocked -> Blocked;
 
   WriteLedger                -> NextTask [loop_restart="true", label="next task, no pause"];
   Blocked                    -> Exit;

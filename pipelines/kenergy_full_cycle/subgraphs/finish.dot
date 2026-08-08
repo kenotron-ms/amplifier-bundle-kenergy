@@ -59,6 +59,20 @@ digraph finish {
   ];
 
   Start [shape=Mdiamond, label="Start"];
+  // --- Bootstrap: fetch amplifier-bundle-kenergy's scripts/ so downstream
+  // tool_command nodes can shell out to them by an addressable path. Needed
+  // because scripts/*.py never travels with a remotely-fetched .dot file
+  // (materialize_remote_dot only fetches dot_file= targets, never files
+  // referenced only inside a tool_command string), and a tool node's CWD in
+  // some execution environments (e.g. a Resolve worker) is the *target*
+  // workspace repo, not this repo -- so a bare relative "scripts/..." or
+  // "../../scripts/..." path is not reliably resolvable. Idempotent (skips
+  // the clone if already present) so re-running this node, or reaching it
+  // both standalone and nested under kenergy_full_cycle.dot, is harmless.
+  Bootstrap [
+    shape=parallelogram, label="Bootstrap Kenergy Scripts", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
+  ];
   Exit  [shape=Msquare,  label="Exit"];
 
   // Faithful to recipes/finish-branch.yaml's capture-entry-paths (Task 14):
@@ -66,59 +80,64 @@ digraph finish {
   // directories, and validate the branch matches what's actually checked out
   // -- reject a caller-supplied branch_name that disagrees with reality.
   CaptureEntryPaths [
-    shape=parallelogram, label="Capture Entry Paths (before any mutation)",
-    tool_command="#!/bin/sh\nset -e\npython3 scripts/capture_entry_paths.py --worktree \"${WORKTREE_PATH:-$(pwd)}\""
+    shape=parallelogram, label="Capture Entry Paths",
+    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/capture_entry_paths.py --worktree \"${WORKTREE_PATH:-$(pwd)}\""
   ];
 
   // Human checkpoint 2 of 2. Exact-match-only per Task 5's fix -- no default
   // action on a blank reply.
   FinishDecision [
     shape=hexagon, mode="multiple_choice", options="merge,pr,keep,discard",
-    label="Finish Decision (merge / PR / keep / discard)",
+    label="Finish Decision",
     prompt="Work is verified and ready. Choose exactly one: merge (fast-forward into the base branch), pr (open a pull request), keep (leave the branch as-is, no action), or discard (delete the branch and worktree -- destructive, requires typed confirmation)."
   ];
 
   DetermineAction [
-    shape=parallelogram, label="Determine Action (exact match only)",
+    shape=parallelogram, label="Determine Action",
     tool_command="bash -c 'case \"$last_response\" in merge|pr|keep|discard) echo \"$last_response\";; *) echo invalid;; esac'",
     fidelity="full"
   ];
 
   InvalidChoice [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Reject Ambiguous Reply",
-    prompt="The reply did not exactly match merge, pr, keep, or discard. State that plainly and ask again -- do not guess or default to any action. Print the single line: invalid_reported"
+    prompt="The reply did not exactly match merge, pr, keep, or discard. State that plainly and ask again -- do not guess or default to any action. "
   ];
 
   ExecuteMerge [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Execute Merge",
-    prompt="cd ${entry_paths.main_repo_path}. Fast-forward merge ${entry_paths.branch_name} into its base branch. Do not force-push. Write .resolve/finish/merge_attempt.json with {\"attempted_sha\":\"...\"}. Print the single line: merge_attempted"
+    prompt="cd ${entry_paths.main_repo_path}. Fast-forward merge ${entry_paths.branch_name} into its base branch. Do not force-push. Write $execution_root/.resolve/finish/merge_attempt.json with {\"attempted_sha\":\"...\"}. "
   ];
 
+  // Writes finish.action / finish.merge_sha directly (parse_json="true") --
+  // this graph's own header documents both as its context outputs, but no
+  // node previously wrote them (same missing-writer bug fixed identically
+  // in build_like_ken.dot's build.verdict and verify.dot's verify.verdict).
   ConfirmMergeLanded [
-    shape=parallelogram, label="Confirm Merge Landed (git log, not the claim)",
-    tool_command="#!/bin/sh\nset -e\nsha=$(python3 -c \"import json;print(json.load(open('.resolve/finish/merge_attempt.json'))['attempted_sha'])\")\nif git -C \"$MAIN_REPO_PATH\" log --oneline -1 | grep -q \"$sha\"; then printf 'merge_confirmed'; else printf 'merge_unconfirmed'; fi",
-    env="MAIN_REPO_PATH=$entry_paths.main_repo_path"
+    shape=parallelogram, goal_gate=true, retry_target="ExecuteMerge", label="Confirm Merge Landed", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nsha=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/merge_attempt.json'))['attempted_sha'])\")\nif git -C \"${entry_paths.main_repo_path}\" log --oneline -1 | grep -q \"$sha\"; then\n  printf '{\"route\":\"merge_confirmed\",\"finish.action\":\"merge\",\"finish.merge_sha\":\"%s\"}' \"$sha\"\nelse\n  printf '{\"route\":\"merge_unconfirmed\"}'\nfi"
   ];
 
   ExecutePR [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Execute Open PR",
-    prompt="cd ${entry_paths.main_repo_path}. Push ${entry_paths.branch_name} and open a PR via gh pr create. Write .resolve/finish/pr_attempt.json with {\"attempted_url\":\"...\"}. Print the single line: pr_attempted"
+    prompt="cd ${entry_paths.main_repo_path}. Push ${entry_paths.branch_name} and open a PR via gh pr create. Write $execution_root/.resolve/finish/pr_attempt.json with {\"attempted_url\":\"...\"}. "
   ];
 
   // Faithful to this repo's own deliver_pr.dot CheckPROpened case study
   // (docs/RUBRIC.md §2): never trust a printed URL as proof a PR exists.
+  // Writes finish.action / finish.pr_url directly (parse_json="true") -- see
+  // ConfirmMergeLanded's note above for the same fix on the merge path.
   ConfirmPROpened [
-    shape=parallelogram, label="Confirm PR Opened (gh pr view, not the claim)",
-    tool_command="#!/bin/sh\nset -e\nurl=$(python3 -c \"import json;print(json.load(open('.resolve/finish/pr_attempt.json'))['attempted_url'])\")\nif gh pr view \"$url\" >/dev/null 2>&1; then printf 'pr_confirmed'; else printf 'pr_unconfirmed'; fi"
+    shape=parallelogram, goal_gate=true, retry_target="ExecutePR", label="Confirm PR Opened", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nurl=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/pr_attempt.json'))['attempted_url'])\")\nif gh pr view \"$url\" >/dev/null 2>&1; then\n  printf '{\"route\":\"pr_confirmed\",\"finish.action\":\"pr\",\"finish.pr_url\":\"%s\"}' \"$url\"\nelse\n  printf '{\"route\":\"pr_unconfirmed\"}'\nfi"
   ];
 
   Keep [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Keep As-Is",
-    prompt="No action taken. Branch ${entry_paths.branch_name} remains at ${entry_paths.worktree_path} for later. Print the single line: kept"
+    prompt="No action taken. Branch ${entry_paths.branch_name} remains at ${entry_paths.worktree_path} for later. When the task above is complete, call the report_outcome tool with status=\"success\" and context_updates={\"finish.action\": \"keep\"}. This is the only requirement here -- no preferred_label is needed (routing is handled by a separate deterministic tool node downstream, not by this field). Do not respond with plain prose as your final action; the tool call itself is what satisfies this gate."
   ];
 
   // Destructive -- requires a typed confirmation, per modes/finish.md's
@@ -132,24 +151,29 @@ digraph finish {
 
   CheckDiscardConfirmation [
     shape=parallelogram, label="Confirmation Matches Branch Name?",
-    tool_command="bash -c 'if [ \"$last_response\" = \"$BRANCH_NAME\" ]; then echo confirmed; else echo cancelled; fi'",
-    env="BRANCH_NAME=$entry_paths.branch_name",
+    tool_command="bash -c 'if [ \"${last_response}\" = \"${entry_paths.branch_name}\" ]; then echo confirmed; else echo cancelled; fi'",
     fidelity="full"
   ];
 
   ExecuteDiscard [
-    shape=box, goal_gate=true, fidelity="full",
+    shape=box, fidelity="full",
     label="Execute Discard",
-    prompt="cd ${entry_paths.main_repo_path}. git worktree remove ${entry_paths.worktree_path} then delete branch ${entry_paths.branch_name}. Print the single line: discarded"
+    prompt="cd ${entry_paths.main_repo_path}. git worktree remove ${entry_paths.worktree_path} then delete branch ${entry_paths.branch_name}. When the task above is complete, call the report_outcome tool with status=\"success\" and context_updates={\"finish.action\": \"discard\"}. This is the only requirement here -- no preferred_label is needed (routing is handled by a separate deterministic tool node downstream, not by this field). Do not respond with plain prose as your final action; the tool call itself is what satisfies this gate."
   ];
 
+  // Scope boundary (intentional): this graph stops at a feature-branch-ready
+  // outcome (merge/PR/keep/discard, confirmed). A PR-review-fix loop +
+  // auto-merge on top of the PR path is deliberately out of scope here --
+  // that would be a separate future "ship" attractor pipeline, not an
+  // addition to finish.dot.
   Report [
-    shape=box, goal_gate=true, fidelity="summary:high",
+    shape=box, fidelity="summary:high",
     label="Report",
-    prompt="Report the confirmed finish outcome plainly -- merge sha, PR URL, kept location, or discard confirmation. Do not claim an action succeeded that was not independently confirmed above. Print the single line: reported"
+    prompt="Report the confirmed finish outcome plainly -- merge sha, PR URL, kept location, or discard confirmation. Do not claim an action succeeded that was not independently confirmed above. "
   ];
 
-  Start                     -> CaptureEntryPaths;
+  Start                     -> Bootstrap;
+  Bootstrap                 -> CaptureEntryPaths;
   CaptureEntryPaths          -> FinishDecision;
   FinishDecision              -> DetermineAction [fidelity="full"];
 
@@ -159,21 +183,18 @@ digraph finish {
   DetermineAction                 -> DiscardConfirmation [condition="context.tool.last_line=discard"];
   DetermineAction                  -> InvalidChoice     [condition="context.tool.last_line=invalid"];
   InvalidChoice                     -> FinishDecision [loop_restart="true"];
-
   ExecuteMerge                       -> ConfirmMergeLanded;
-  ConfirmMergeLanded                  -> Report [condition="context.tool.last_line=merge_confirmed", weight="2"];
-  ConfirmMergeLanded                   -> ExecuteMerge [condition="context.tool.last_line=merge_unconfirmed", label="retry once, bounded by default_max_retry=2"];
+  ConfirmMergeLanded                  -> Report [condition="context.route=merge_confirmed", weight="2"];
+  ConfirmMergeLanded                   -> ExecuteMerge [condition="context.route=merge_unconfirmed", label="retry once, bounded by default_max_retry=2"];
 
   ExecutePR                             -> ConfirmPROpened;
-  ConfirmPROpened                        -> Report [condition="context.tool.last_line=pr_confirmed", weight="2"];
-  ConfirmPROpened                         -> ExecutePR [condition="context.tool.last_line=pr_unconfirmed", label="retry once, bounded by default_max_retry=2"];
+  ConfirmPROpened                        -> Report [condition="context.route=pr_confirmed", weight="2"];
+  ConfirmPROpened                         -> ExecutePR [condition="context.route=pr_unconfirmed", label="retry once, bounded by default_max_retry=2"];
 
   Keep                                     -> Report;
-
   DiscardConfirmation                       -> CheckDiscardConfirmation [fidelity="full"];
   CheckDiscardConfirmation                   -> ExecuteDiscard [condition="context.tool.last_line=confirmed"];
   CheckDiscardConfirmation                    -> Report        [condition="context.tool.last_line=cancelled", label="cancelled -- no action taken"];
   ExecuteDiscard                               -> Report;
-
   Report                                        -> Exit;
 }
