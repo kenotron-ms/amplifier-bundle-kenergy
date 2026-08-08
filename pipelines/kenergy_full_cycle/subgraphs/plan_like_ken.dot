@@ -102,5 +102,20 @@ digraph plan_like_ken {
   ConfirmPlanArtifact   -> HandoffToExecution [condition="context.tool.last_line=contract_satisfied", weight="2"];
   ConfirmPlanArtifact   -> FixPlanArtifact    [condition="context.tool.last_line=contract_violated"];
   FixPlanArtifact       -> ConfirmPlanArtifact [loop_restart="true"];
-  HandoffToExecution    -> Exit;
+
+  // Bridge: PlanLikeKen's parent (kenergy_full_cycle.dot) declares
+  // outputs="plan.plan_doc" on this subgraph's folder node, but no node
+  // above ever emits a flat `plan_doc` context key -- only a FILE at
+  // .resolve/plan/plan_path.txt. Same class of bug as think_like_ken.dot's
+  // EmitDesignDocOutput (see that node's comment for the full mechanism):
+  // without this, context.plan.plan_doc is never set in the parent, and
+  // RenamePlanDocForBuild's ${plan.plan_doc} substitution is left as a
+  // literal unexpanded token, which the shell chokes on ("Bad substitution").
+  EmitPlanDocOutput [
+    shape=parallelogram, parse_json="true", label="Emit plan_doc for parent context",
+    tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/plan/plan_path.txt)\npython3 -c \"import json;print(json.dumps({'plan_doc': '$path'}))\""
+  ];
+
+  HandoffToExecution    -> EmitPlanDocOutput;
+  EmitPlanDocOutput     -> Exit;
 }

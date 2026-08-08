@@ -271,5 +271,23 @@ digraph think_like_ken {
   AdversarialGate                  -> Report             [condition="context.tool.last_line=cap_reached", label="3-cycle cap reached -- proceed with residual findings noted"];
   AdversarialGate                  -> FixSelfReview        [condition="context.tool.last_line=revise"];
 
-  Report                            -> Exit;
+
+  // Bridge: ThinkLikeKen's parent (kenergy_full_cycle.dot) declares
+  // outputs="design.design_doc" on this subgraph's folder node, but no node
+  // above ever emits a flat `design_doc` context key -- only a FILE at
+  // .resolve/design/design_doc_path.txt. A folder node's outputs= merge only
+  // promotes keys that actually exist in the child's final context, so
+  // without this node context.design.design_doc is never set in the parent,
+  // and RenameDesignDocForPlan's ${design.design_doc} substitution is left
+  // as a literal unexpanded token -- which the shell then chokes on ("Bad
+  // substitution", since dots aren't valid in bash variable names). Emits
+  // the file's contents as the flat key this graph's own outputs contract
+  // promises.
+  EmitDesignDocOutput [
+    shape=parallelogram, parse_json="true", label="Emit design_doc for parent context",
+    tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/design/design_doc_path.txt)\npython3 -c \"import json;print(json.dumps({'design_doc': '$path'}))\""
+  ];
+
+  Report                            -> EmitDesignDocOutput;
+  EmitDesignDocOutput                -> Exit;
 }
