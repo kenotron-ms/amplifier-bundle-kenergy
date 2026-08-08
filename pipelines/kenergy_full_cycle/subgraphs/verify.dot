@@ -58,7 +58,7 @@ digraph verify {
   // both standalone and nested under kenergy_full_cycle.dot, is harmless.
   Bootstrap [
     shape=parallelogram, label="Bootstrap Kenergy Scripts", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nprintf '{\\\"kenergy_root\\\":\\\"%s\\\"}' \"$D\""
+    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
   ];
   Exit  [shape=Msquare,  label="Exit"];
 
