@@ -183,9 +183,18 @@ digraph build_like_ken {
   // ConfirmVerdictAgainstRepo's downstream commit-sha check, applied one
   // step earlier so a malformed/missing artifact never even reaches
   // RouteVerificationLevel.
-  ImplementArtifactGate [
-    shape=parallelogram, goal_gate=true, retry_target="Implement", label="Implement Artifact Well-Formed?",
-    tool_command="#!/bin/sh\nset -e\nf=\"${execution_root}/.resolve/build/impl_${task_id}.json\"\nstatus=$(python3 -c \"import json;print(json.load(open('$f')).get('status',''))\" 2>/dev/null || echo '')\nsha=$(python3 -c \"import json;print(json.load(open('$f')).get('commit_sha',''))\" 2>/dev/null || echo '')\ncase \"$status\" in\n  DONE|DONE_WITH_CONCERNS)\n    if [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then printf 'ok'; else printf 'missing'; fi\n    ;;\n  NEEDS_CONTEXT|BLOCKED)\n    printf 'ok'\n    ;;\n  *)\n    printf 'missing'\n    ;;\nesac"
+  //
+  // Renamed from ImplementArtifactGate: the previous case statement
+  // collapsed four semantically distinct implementer outcomes (DONE,
+  // DONE_WITH_CONCERNS, NEEDS_CONTEXT, BLOCKED) into a binary ok/missing
+  // artifact check, silently routing NEEDS_CONTEXT and BLOCKED down the
+  // identical "ok" path into RouteVerificationLevel/review as a normal DONE.
+  // Now exposed as three distinct DOT edges (done/needs_context/blocked)
+  // so the real business-meaningful distinction is visible in the graph,
+  // not discarded inside the shell.
+  ImplementOutcomeGate [
+    shape=parallelogram, goal_gate=true, retry_target="Implement", label="Implement Outcome?",
+    tool_command="#!/bin/sh\nset -e\nf=\"${execution_root}/.resolve/build/impl_${task_id}.json\"\nstatus=$(python3 -c \"import json;print(json.load(open('$f')).get('status',''))\" 2>/dev/null || echo '')\nsha=$(python3 -c \"import json;print(json.load(open('$f')).get('commit_sha',''))\" 2>/dev/null || echo '')\ncase \"$status\" in\n  DONE|DONE_WITH_CONCERNS)\n    if [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then printf 'ok'; else printf 'missing'; fi\n    ;;\n  NEEDS_CONTEXT)\n    printf 'needs_context'\n    ;;\n  BLOCKED)\n    printf 'blocked'\n    ;;\n  *)\n    printf 'missing'\n    ;;\nesac"
   ];
 
   // --- Verification-level router: reads the FILE the implementer just wrote
@@ -339,9 +348,11 @@ digraph build_like_ken {
 
   DefineTaskCriteria        -> SaveTaskState;
   SaveTaskState             -> Implement;
-  Implement                 -> ImplementArtifactGate;
-  ImplementArtifactGate      -> RouteVerificationLevel [condition="context.tool.last_line=ok", weight="2"];
-  ImplementArtifactGate      -> Implement               [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact missing/malformed or commit_sha does not resolve, bounded by default_max_retry=2"];
+  Implement                 -> ImplementOutcomeGate;
+  ImplementOutcomeGate       -> RouteVerificationLevel [condition="context.tool.last_line=ok", weight="2"];
+  ImplementOutcomeGate       -> Implement               [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact missing/malformed or commit_sha does not resolve, bounded by default_max_retry=2"];
+  ImplementOutcomeGate       -> Implement               [condition="context.tool.last_line=needs_context", loop_restart="true", label="re-implement -- implementer reported NEEDS_CONTEXT, distinct from a malformed artifact"];
+  ImplementOutcomeGate       -> ComputeBuildVerdictBlocked [condition="context.tool.last_line=blocked", label="BLOCKED: skip review entirely, straight to ledger-blocked path"];
   RouteVerificationLevel    -> ScenarioVerificationGate  [condition="context.tool.last_line=browser"];
   RouteVerificationLevel    -> IntegrationTestingGate    [condition="context.tool.last_line=dtu"];
   RouteVerificationLevel    -> BuildReviewPackage        [condition="context.tool.last_line=static", weight="2"];
