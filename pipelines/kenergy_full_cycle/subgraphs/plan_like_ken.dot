@@ -65,7 +65,7 @@ digraph plan_like_ken {
   // both standalone and nested under kenergy_full_cycle.dot, is harmless.
   Bootstrap [
     shape=parallelogram, label="Bootstrap Kenergy Scripts", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
+    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nmkdir -p \"$execution_root/.resolve/kenergy/agents\"\ncp \"$D/agents/design-writer.md\" \"$execution_root/.resolve/kenergy/agents/design-writer.md\"\ncp \"$D/agents/plan-writer.md\" \"$execution_root/.resolve/kenergy/agents/plan-writer.md\"\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
   ];
   Exit  [shape=Msquare,  label="Exit"];
 
@@ -75,7 +75,7 @@ digraph plan_like_ken {
   DelegatePlanWriter [
     shape=box, fidelity="full",
     label="Delegate to Plan-Writer",
-    prompt="Read the approved design at $design_doc and repository conventions. Resolve implementation-level details with engineering judgment -- do not ask the human to confirm task breakdown, granularity, ordering, or file decomposition unless the design leaves a fact only they can supply.\n\nWrite $execution_root/docs/plans/<date>-<feature>-implementation.md with: a header (Goal/Architecture/Tech Stack/Verification approach), a '## Global Constraints' block capturing the design's project-wide requirements verbatim, and one '### Task N' section per task, each with non-empty Description/Goal/Specification/Acceptance Criteria/Files/Interfaces (Consumes/Produces)/Model Roles (implementation_model_role, review_model_role, escalated_model_role) and complete, copy-pasteable code -- no '// add your code here' placeholders. Write $execution_root/.resolve/plan/plan_path.txt with the saved path"
+    prompt="Follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/plan-writer.md) exactly. Using that role, write the implementation plan yourself now -- do not attempt to delegate or spawn a separate agent. Read the approved design at $design_doc and repository conventions. Resolve implementation-level details with engineering judgment -- do not ask the human to confirm task breakdown, granularity, ordering, or file decomposition unless the design leaves a fact only they can supply.\n\nWrite $execution_root/docs/plans/<date>-<feature>-implementation.md with: a header (Goal/Architecture/Tech Stack/Verification approach), a '## Global Constraints' block capturing the design's project-wide requirements verbatim, and one '### Task N' section per task, each with non-empty Description/Goal/Specification/Acceptance Criteria/Files/Interfaces (Consumes/Produces)/Model Roles (implementation_model_role, review_model_role, escalated_model_role) and complete, copy-pasteable code -- no '// add your code here' placeholders. Write $execution_root/.resolve/plan/plan_path.txt with the saved path"
   ];
 
   // THE GATE -- never trust "plan_done" as proof the required sections exist.
@@ -87,7 +87,7 @@ digraph plan_like_ken {
   FixPlanArtifact [
     shape=box, fidelity="full",
     label="Fix Plan Sections",
-    prompt="ConfirmPlanArtifact found this plan does not yet satisfy the required contract: ${tool.last_output}\n\nRe-delegate to kenergy:plan-writer's own contract and fix exactly the named gaps -- do not rewrite unrelated sections. "
+    prompt="Follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/plan-writer.md) exactly. Using that role, fix the plan directly yourself -- do not attempt to delegate or spawn a separate agent. ConfirmPlanArtifact found this plan does not yet satisfy the required contract: ${tool.last_output}\n\nFix exactly the named gaps -- do not rewrite unrelated sections. "
   ];
 
   HandoffToExecution [

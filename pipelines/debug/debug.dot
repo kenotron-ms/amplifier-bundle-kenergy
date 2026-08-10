@@ -98,11 +98,16 @@ digraph debug {
     tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('confirmed' if json.load(open('${execution_root}/.resolve/debug/hypothesis.json'))['confirmed'] else 'not_confirmed')\""
   ];
 
-  // Phase 4: Fix -- delegated, never done by the orchestrator itself.
+  // Phase 4: Fix -- performed directly by this node in VDD implementer role
+  // (not delegated to a named sub-agent -- session.spawn-based delegation is
+  // not guaranteed available in every execution environment, e.g. a Resolve
+  // worker container. This node already has full tool access, so it acts as
+  // the implementer itself rather than naming foundation:bug-hunter /
+  // kenergy:implementer and hoping the runtime resolves the handoff).
   DelegateFix [
     shape=box, fidelity="full",
-    label="Delegate the Fix (Phase 4)",
-    prompt="Root cause confirmed: $(cat $execution_root/.resolve/debug/hypothesis.json). Delegate to foundation:bug-hunter or kenergy:implementer: reproduce the bug first to confirm it still exists, apply the minimal fix, verify with real execution that the bug is gone, commit. Write $execution_root/.resolve/debug/fix_attempt.json with {\"commit_sha\":\"...\",\"attempt_number\":<int>}. "
+    label="Fix the Bug (Phase 4, VDD implementer role)",
+    prompt="Root cause confirmed: $(cat $execution_root/.resolve/debug/hypothesis.json). Acting directly in the VDD implementer role -- do not attempt to delegate or spawn a separate agent -- reproduce the bug first to confirm it still exists, apply the minimal fix (no unrequested scope), verify with real execution at the appropriate level that the bug is gone (do not substitute a unit test for non-library behavior), commit atomically. Write $execution_root/.resolve/debug/fix_attempt.json with {\"commit_sha\":\"...\",\"attempt_number\":<int>}. "
   ];
 
   // THE GATE. Never trust the fix delegation's own claim -- re-run the

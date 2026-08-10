@@ -66,7 +66,7 @@ digraph think_like_ken {
   // both standalone and nested under kenergy_full_cycle.dot, is harmless.
   Bootstrap [
     shape=parallelogram, label="Bootstrap Kenergy Scripts", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
+    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nmkdir -p \"$execution_root/.resolve/kenergy/agents\"\ncp \"$D/agents/design-writer.md\" \"$execution_root/.resolve/kenergy/agents/design-writer.md\"\ncp \"$D/agents/plan-writer.md\" \"$execution_root/.resolve/kenergy/agents/plan-writer.md\"\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
   ];
   Exit  [shape=Msquare,  label="Exit"];
 
@@ -216,7 +216,7 @@ digraph think_like_ken {
   DelegateDesignWriter [
     shape=box, fidelity="full",
     label="Delegate to Design-Writer",
-    prompt="Delegate document creation to kenergy:design-writer. Include the complete approved consolidated review and all resolved fork answers. Instruct it to save to $execution_root/docs/plans/<date>-<topic>-design.md with: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Write $execution_root/.resolve/design/design_doc_path.txt with the saved path. "
+    prompt="Follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/design-writer.md) exactly. Using that role, write the design document yourself now -- do not attempt to delegate or spawn a separate agent. Include the complete approved consolidated review and all resolved fork answers. Save to $execution_root/docs/plans/<date>-<topic>-design.md with: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Write $execution_root/.resolve/design/design_doc_path.txt with the saved path. "
   ];
 
   // Deterministic gate: DelegateDesignWriter's own report_outcome claim is
@@ -244,7 +244,7 @@ digraph think_like_ken {
   FixSelfReview [
     shape=box, fidelity="full",
     label="Re-delegate Corrections",
-    prompt="Re-delegate to kenergy:design-writer with the specific issues from $execution_root/.resolve/design/self_review.json. "
+    prompt="Follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/design-writer.md) exactly. Using that role, fix the specific issues from $execution_root/.resolve/design/self_review.json directly in the design document -- do not attempt to delegate or spawn a separate agent. "
   ];
 
   AdversarialReview [
