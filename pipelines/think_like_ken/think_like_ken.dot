@@ -270,8 +270,19 @@ digraph think_like_ken {
   ContextArtifactGate         -> IdentifyForks       [condition="context.tool.last_line=ok", weight="2"];
   ContextArtifactGate         -> UnderstandContext    [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=3"];
   IdentifyForks               -> ForkGate;
-  ForkGate                    -> ResolveForks         [condition="context.tool.last_line=has_forks"];
-  ForkGate                    -> SynthesizeDecisions  [condition="context.tool.last_line=no_forks", weight="2"];
+  // Edges compare context.route (the parse_json-merged key), not
+  // context.tool.last_line -- ForkGate's tool_command prints a JSON object
+  // ({"route": "has_forks"|"no_forks", ...}), not a bare word, so
+  // tool.last_line is the literal JSON text and can never equal "has_forks"/
+  // "no_forks". This edge never matched in production (confirmed live via a
+  // Resolve instance: IdentifyForks->ForkGate looped 51 times over ~30
+  // minutes before a no_matching_edge hard failure). parse_json="true"
+  // merges the JSON's top-level keys directly into flat context, so
+  // context.route is the correct comparison target -- same pattern already
+  // used correctly by ConfirmMergeLanded/ConfirmPROpened (finish.dot) and
+  // OverallGate/CheckRetryCount (verify.dot).
+  ForkGate                    -> ResolveForks         [condition="context.route=has_forks"];
+  ForkGate                    -> SynthesizeDecisions  [condition="context.route=no_forks", weight="2"];
   ResolveForks                -> RecordForkAnswers     [fidelity="full"];
   RecordForkAnswers           -> IdentifyForks         [loop_restart="true", label="re-check for new forks"];
 
