@@ -1,0 +1,17 @@
+bundle:
+  name: goaltractor-behavior
+  version: 1.0.0
+  description: Wires the goaltractor skill and its pipeline building blocks
+
+tools:
+  - module: tool-skills
+    config:
+      skills:
+        - "@kenergy:skills/goaltractor"
+
+context:
+  include:
+    # Points the agent at the reusable per-goal sub-pipeline goaltractor
+    # compiles against -- kept as a pointer, not inlined, so it costs
+    # nothing until a goaltractor-compiled pipeline is actually authored.
+    - kenergy:pipelines/goals/goal_runner.dot
