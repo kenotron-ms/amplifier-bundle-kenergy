@@ -242,15 +242,37 @@ digraph think_like_ken {
     prompt="Dispatch an adversarial review of $(cat $execution_root/.resolve/design/design_doc_path.txt) using the prompt at kenergy:context/spec-document-review-prompt.md. Write $execution_root/.resolve/design/adversarial_review.json with {\"pass\":true|false,\"findings\":[...],\"cycle\":<int>}. "
   ];
 
+  // Cycle count is now tracked DETERMINISTICALLY by scripts/bump_cycle.py,
+  // not self-reported by the LLM into adversarial_review.json. A prior
+  // version had AdversarialReview write its own "cycle" key alongside its
+  // pass/fail verdict, and the gate read `d['cycle'] >= 3` from that
+  // self-authored value -- a value the loop body itself invents is not a
+  // cap. Observed in production: at execution #14 the model wrote
+  // {"cycle": 1} again, so the cap never tripped (27 SelfReview + 17
+  // AdversarialReview + 27 FixSelfReview executions over ~80 minutes in one
+  // Resolve run). bump_cycle.py increments a plain integer file outside the
+  // model's own JSON write, exactly once per AdversarialGate execution
+  // (which runs exactly once per full loop iteration). The model's
+  // "pass"/"fail" verdict is still read from its own JSON -- that's a
+  // legitimate judgment call, not a loop-bound counter -- only the count
+  // that gates the bound is no longer self-reported.
   AdversarialGate [
     shape=parallelogram, goal_gate=true, retry_target="AdversarialReview", label="Adversarial Review Pass or Cap Reached?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\nd=json.load(open('${execution_root}/.resolve/design/adversarial_review.json'))\nif d['pass']: print('pass')\nelif d['cycle'] >= 3: print('cap_reached')\nelse: print('revise')\n\""
+    tool_command="#!/bin/sh\nset -e\ncycle=$(python3 ${kenergy_root}/scripts/bump_cycle.py --state-file \"${execution_root}/.resolve/design/adversarial_cycle.count\" | python3 -c \"import json,sys;print(json.load(sys.stdin)['cycle'])\")\npython3 -c \"\nimport json\nd=json.load(open('${execution_root}/.resolve/design/adversarial_review.json'))\ncycle=$cycle\nif d['pass']: print('pass')\nelif cycle >= 3: print('cap_reached')\nelse: print('revise')\n\""
   ];
 
+  // Report-only: this pipeline's sink is exactly one artifact (a design
+  // document -- see header section 1). It must not hint at, suggest, or imply any
+  // next step, including naming /plan-like-ken or "implementation planning."
+  // A prior version's prompt ("...ready for implementation planning.") was
+  // declarative prose with no instruction verb, handed to a shape=box node
+  // with full tool access -- the model read it as a task and wrote an
+  // unrequested full implementation plan alongside the design doc. Made
+  // deterministic (no LLM) since there is nothing to decide: it only prints
+  // a fixed, already-known path.
   Report [
-    shape=box, fidelity="summary:high",
-    label="Report Final Artifact",
-    prompt="Design document saved to $(cat $execution_root/.resolve/design/design_doc_path.txt). The approved design is complete and ready for implementation planning. "
+    shape=parallelogram, label="Report Final Artifact",
+    tool_command="#!/bin/sh\nset -e\npath=$(cat $execution_root/.resolve/design/design_doc_path.txt)\nprintf 'Design document saved to %s. Design phase complete.\\n' \"$path\""
   ];
 
   Start                     -> Bootstrap;
