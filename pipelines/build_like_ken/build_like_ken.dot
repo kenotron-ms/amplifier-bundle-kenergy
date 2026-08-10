@@ -338,8 +338,16 @@ digraph build_like_ken {
   ValidateLedgerIdentity    -> Exit                  [condition="context.route=identity_mismatch", label="BLOCKED: cross-plan state"];
   ValidateLedgerIdentity    -> PreflightConflictScan  [condition="context.route=identity_ok", weight="2"];
   PreflightConflictScan     -> PreflightGate;
-  PreflightGate             -> NextTask               [condition="context.tool.last_line=clear", weight="2"];
-  PreflightGate             -> PlanConflictEscalation [condition="context.tool.last_line=conflicts"];
+  // Edges compare context.route (the parse_json-merged key), not
+  // context.tool.last_line -- same bug class and same fix as ForkGate in
+  // think_like_ken.dot: PreflightGate's tool_command prints a JSON object
+  // ({"route": "clear"|"conflicts", ...}), not a bare word, so
+  // tool.last_line is the literal JSON text and can never equal "clear"/
+  // "conflicts". parse_json="true" merges the JSON's top-level keys
+  // directly into flat context, so context.route is the correct comparison
+  // target.
+  PreflightGate             -> NextTask               [condition="context.route=clear", weight="2"];
+  PreflightGate             -> PlanConflictEscalation [condition="context.route=conflicts"];
   PlanConflictEscalation    -> Exit                   [label="revise plan via /plan-like-ken, then re-run"];
 
   NextTask                  -> DefineTaskCriteria     [condition="context.route=has_task", weight="2"];
