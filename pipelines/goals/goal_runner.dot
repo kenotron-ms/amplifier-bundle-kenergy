@@ -1,0 +1,51 @@
+// goal_runner.dot -- shared per-goal sub-pipeline for goaltractor-compiled pipelines
+//
+// THE SHAPE: implement -> evidence gate -> corrective back-edge -> done
+//
+// This is the reusable "worker" invoked by folder-shape nodes in a
+// goaltractor-compiled top-level .dot -- one instance per goal, each with
+// its own context.goal / context.output_file / context.min_words params.
+//
+// The gate is a deterministic tool node: it does not ask an LLM whether the
+// work is done, it checks the filesystem. If the file doesn't exist yet, or
+// is implausibly short, it fails and routes back to implement with the goal
+// text as the only steering context (goaltractor's DoD IS the prompt).
+//
+// Params expected via context.* injection from the parent graph:
+//   goal          -- the full goal text, including its Definition of Done
+//   output_file   -- path (relative to cwd) the goal's artifact must exist at
+//   min_words     -- optional minimum word count for the gate (default 150)
+
+digraph goal_runner {
+    graph [
+        default_fidelity="full",
+        default_thread_id="goal"
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+
+    implement [
+        label="Implement Goal",
+        prompt="You are working a single goal from a larger goaltractor-compiled pipeline.\n\nGoal (this is also your Definition of Done -- read it carefully, it specifies exactly what the output file must contain):\n$goal\n\nWrite your output to: $output_file\n\nIf gate_output.txt exists in the working directory, read it first -- it holds feedback from the last attempt's evidence gate telling you what was missing or insufficient. Address that feedback directly.\n\nWrite complete, real content -- do not stub out sections or leave placeholders. When you are done, the file at $output_file must satisfy the Definition of Done stated in the goal above."
+    ]
+
+    // Evidence gate: file must exist and clear a minimum size floor.
+    // This is a coarse mechanical proxy (goaltractor's DoDs describe required
+    // sections/content in prose that a human or a stricter downstream lint
+    // could check more precisely) but it is genuinely unfakeable: an empty
+    // or missing file cannot pass, no matter what the worker claims.
+    gate [
+        shape=parallelogram,
+        label="artifact gate",
+        tool_command="test -f \"$output_file\" && words=$(wc -w < \"$output_file\") && echo \"file=$output_file words=$words\" > gate_output.txt && [ \"$words\" -ge \"${min_words:-150}\" ] && echo gate_pass || { echo \"gate_fail: $output_file missing or under ${min_words:-150} words\" >> gate_output.txt; echo gate_fail; }",
+        goal_gate=true,
+        retry_target="implement"
+    ]
+
+    done [shape=Msquare, label="Done"]
+
+    start -> implement
+    implement -> gate
+    gate -> done      [label="artifact present", condition="context.tool.last_line=gate_pass"]
+    gate -> implement [label="fix and retry",     condition="context.tool.last_line=gate_fail", loop_restart="true"]
+}

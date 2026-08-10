@@ -1,0 +1,111 @@
+// todo-apps-adhd-study.dot
+//
+// goaltractor-compiled pipeline: batched, dependency-ordered /goal work for
+// the todo-apps research -> ADHD concern-tracker design pile.
+//
+// Batch 1 (parallel, max_parallel=2):
+//   Goal1a - research mainstream productivity todo apps
+//   Goal1b - research ADHD-specific/adjacent todo apps
+// Join1  -> Synth1 (depends on both 1a and 1b): synthesize into one study
+// Check1 -> human checkpoint: review the synthesized study before Batch 2
+// Batch2 (depends on Check1 approval): design the ADHD concern-tracker
+// Final  -> integration/consistency review of research + design together
+//
+// No checkpoint after Batch2/Final -- runs straight through once Check1 is
+// approved, per the approved plan.
+//
+// Each goal node is a shape=folder invocation of goal_runner.dot, carrying
+// its DoD as context.goal -- goal_runner.dot owns its own internal
+// implement -> evidence-gate -> retry loop; this graph only sequences and
+// parallelizes goal_runner invocations, it does not re-implement their
+// internal convergence loop.
+//
+// Bounds: these are doc-writing/research goals (no code, no test suite to
+// loop against), so bounds are generous but not unbounded --
+// default_max_retry=2 per goal_runner invocation, max_pipeline_duration=45m
+// for the whole graph (5 sequential/parallel goal_runner invocations,
+// research + writing, run locally).
+
+digraph todo_apps_adhd_study {
+  graph [
+    label="Todo apps study -> ADHD concern-tracker design (goaltractor)",
+    goal="Produce a synthesized todo-apps study and an ADHD-oriented concern-tracker design informed by it",
+    rankdir=LR,
+    default_max_retry=2,
+    max_pipeline_duration=45m,
+    default_fidelity="summary:high",
+    model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic; }"
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit  [shape=Msquare,  label="Exit"];
+
+  // --- Batch 1: parallel research (max_parallel=2, both branches independent) ---
+  Batch1 [shape=component, label="Batch 1: Parallel Research", join_policy="wait_all", max_parallel="2"];
+
+  Goal1a [
+    shape=folder, label="1a: Mainstream Todo Apps Research",
+    dot_file="pipelines/goals/goal_runner.dot",
+    "context.goal"="Research mainstream productivity todo apps. DoD: create docs/research/todo-apps-mainstream.md containing: (1) a comparison table covering at least 6 well-known mainstream todo apps (Todoist, Things, TickTick, Microsoft To Do, Notion, Apple Reminders) across the dimensions: capture speed, organization model, review/prioritization, notifications, cognitive load; (2) a 'Strengths' section; (3) a 'Weaknesses' section identifying common failure patterns (e.g. abandoned lists, rigid taxonomy, capture friction, out-of-sight-out-of-mind).",
+    "context.output_file"="docs/research/todo-apps-mainstream.md",
+    "context.min_words"="400"
+  ];
+
+  Goal1b [
+    shape=folder, label="1b: ADHD-Specific Todo Apps Research",
+    dot_file="pipelines/goals/goal_runner.dot",
+    "context.goal"="Research ADHD-specific and ADHD-adjacent todo/task apps already on the market. DoD: create docs/research/todo-apps-adhd-specific.md containing: (1) a comparison table covering at least 4 ADHD-marketed or ADHD-adjacent apps (e.g. Tiimo, Llama Life, Sunsama, Amazing Marvin, Focus Bear) across the dimensions: capture speed, organization model, review/prioritization, notifications, cognitive load, body-doubling/accountability features, time-blindness support; (2) a 'Strengths' section; (3) a 'Weaknesses/gaps' section.",
+    "context.output_file"="docs/research/todo-apps-adhd-specific.md",
+    "context.min_words"="300"
+  ];
+
+  Join1 [shape=tripleoctagon, label="Join 1: Research Complete"];
+
+  Synth1 [
+    shape=folder, label="Synth1: Synthesize Todo-Apps Study",
+    dot_file="pipelines/goals/goal_runner.dot",
+    "context.goal"="Synthesize the two prior research files into docs/research/todo-apps-study.md. DoD: the file must explicitly reference and draw from both docs/research/todo-apps-mainstream.md and docs/research/todo-apps-adhd-specific.md, include a 'Cross-cutting takeaways' section synthesizing mainstream vs ADHD-specific patterns, and identify unmet needs relevant to attention/executive-function challenges.",
+    "context.output_file"="docs/research/todo-apps-study.md",
+    "context.min_words"="400"
+  ];
+
+  // --- Human checkpoint: review the synthesized study before proceeding ---
+  Check1 [
+    shape=hexagon, mode="multiple_choice", options="approve,revise",
+    label="Check 1: Review Synthesized Study",
+    prompt="Review docs/research/todo-apps-study.md for quality and completeness before proceeding to the ADHD concern-tracker design phase. Choose exactly one: approve (proceed to design) or revise (send back to Synth1 for another pass)."
+  ];
+
+  // --- Batch 2: single goal, depends on Check1 approval ---
+  Batch2 [
+    shape=folder, label="Batch 2: ADHD Concern-Tracker Design",
+    dot_file="pipelines/goals/goal_runner.dot",
+    "context.goal"="Design an ADHD-oriented concern/thought/todo-tracker app informed by the research. DoD: create docs/designs/adhd-concern-tracker-design.md that explicitly references at least 3 findings from docs/research/todo-apps-study.md, includes a 'Design Principles for ADHD' section (e.g. low-friction capture, externalized working memory, gentle re-surfacing, non-judgmental triage, minimal categorization overhead), a core feature set (capture, triage, review loop, notifications/nudges), an explicit 'What we're deliberately NOT doing' scope-exclusion section, and an open questions/risks section.",
+    "context.output_file"="docs/designs/adhd-concern-tracker-design.md",
+    "context.min_words"="400"
+  ];
+
+  // --- Final: integration/consistency review, straight through, no checkpoint ---
+  Final [
+    shape=folder, label="Final: Integration/Consistency Review",
+    dot_file="pipelines/goals/goal_runner.dot",
+    "context.goal"="Review docs/research/todo-apps-study.md and docs/designs/adhd-concern-tracker-design.md together for consistency (design must not contradict research findings). Reconcile any inconsistencies and finalize both documents.",
+    "context.output_file"="docs/designs/adhd-concern-tracker-design.md",
+    "context.min_words"="400"
+  ];
+
+  // --- Flow ---
+  Start  -> Batch1;
+  Batch1 -> Goal1a;
+  Batch1 -> Goal1b;
+  Goal1a -> Join1;
+  Goal1b -> Join1;
+  Join1  -> Synth1;
+  Synth1 -> Check1;
+
+  Check1 -> Batch2 [condition="preferred_label=approve", label="approve"];
+  Check1 -> Synth1 [condition="preferred_label=revise",  label="revise", loop_restart="true"];
+
+  Batch2 -> Final;
+  Final  -> Exit;
+}
