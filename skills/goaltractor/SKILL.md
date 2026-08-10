@@ -3,8 +3,8 @@ name: goaltractor
 description: >
   Turn a pile of work (issues, design docs, a big feature) into ONE attractor
   pipeline that runs batched, dependency-ordered, parallel /goal work —
-  locally or submitted once to Amplifier Resolve (resolve.amplifier.ms,
-  dot-graph resolver). Triggers: "/goaltractor", "compile this into a
+  locally or submitted once to a remote resolve service (dot-graph
+  resolver). Triggers: "/goaltractor", "compile this into a
   pipeline", "batch these goals", "run this pile of work in parallel",
   "goaltractor this".
 user-invocable: true
@@ -31,7 +31,15 @@ shortcut: goaltractor
 # /goaltractor — Goal-to-Attractor Compiler
 
 Compiles a pile of work into one attractor pipeline: batched, dependency-ordered,
-parallel `/goal` execution, runnable locally or submitted once to Resolve.
+parallel `/goal` execution, runnable locally or submitted once to a remote
+resolve service.
+
+**Prerequisite for remote submission:** a resolve service must already be
+reachable. From the Amplifier app CLI, this comes via the `bundle-resolve`
+bundle (wires up talking to a resolve service directly). For other agents
+(delegated sub-agents, non-CLI callers), use the resolve MCP server instead
+of driving HTTP calls by hand. If neither is configured, stop and tell the
+user before attempting Step 5's remote path -- fall back to local execution.
 
 If you were dispatched via `delegate()` for a specific sub-task, skip the
 interactive flow below and just do that task.
@@ -121,14 +129,16 @@ fails lint.
 
 ## Step 5 — Choose execution target (REQUIRED STOP)
 
-Ask: run locally, or submit once to Resolve (`resolve.amplifier.ms`,
-`dot-graph` resolver)?
+Ask: run locally, or submit once to a remote resolve service (`dot-graph`
+resolver)?
 
 **Local:** hand back the `.dot` path and the local attractor invocation
 command (iteration cap + wall-clock bound must be present as graph
 attributes — confirm with attractor-expert if unsure).
 
-**Resolve:** before submitting anything —
+**Remote resolve service:** before submitting anything, confirm the
+prerequisite from Step 0's header note (`bundle-resolve` for the Amplifier
+CLI, resolve MCP for other agents) is actually reachable — then:
 1. Commit the compiled `.dot` to the repo (the hosted server does not
    persist submitted pipeline content — the repo is the system of record)
 2. Run `validate_pipeline()` against the committed content and fix any
@@ -144,8 +154,8 @@ attributes — confirm with attractor-expert if unsure).
 ## Step 6 — Monitor
 
 If local: suggest `/monitor` watching the tmux/worktree processes.
-If Resolve: suggest `/monitor` watching the single instance ID, polling at
-whatever cadence the user wants (Resolve has no push channel outside the
+If remote resolve service: suggest `/monitor` watching the single instance
+ID, polling at whatever cadence the user wants (no push channel outside the
 frontend's SSE).
 
 If a `hexagon` checkpoint is hit, the instance parks in `awaiting_input` —

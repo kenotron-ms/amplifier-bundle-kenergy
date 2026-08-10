@@ -8,9 +8,16 @@ This directory holds the runnable building blocks for the `/goaltractor` skill
 `/goaltractor` takes a pile of work — issues, design docs, a big feature —
 and compiles it into one attractor `.dot` pipeline: batched,
 dependency-ordered, parallel `/goal` execution, runnable locally or
-submitted once to Amplifier Resolve (`resolve.amplifier.ms`, `dot-graph`
-resolver). See the skill file for the full interactive flow (decomposition
-→ batch plan review → compile → execution target → monitor).
+submitted once to a remote resolve service (`dot-graph` resolver). See the
+skill file for the full interactive flow (decomposition → batch plan review
+→ compile → execution target → monitor).
+
+**Prerequisite for remote submission:** a resolve service must already be
+reachable before you can submit to it. The Amplifier app CLI reaches one via
+the `bundle-resolve` bundle; other agents (delegated sub-agents, non-CLI
+callers) should use the resolve MCP server rather than driving HTTP calls by
+hand. Without one of these configured, `/goaltractor` falls back to local
+execution.
 
 ## Files here
 
