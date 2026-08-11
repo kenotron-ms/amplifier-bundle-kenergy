@@ -1,194 +1,116 @@
 // think_like_ken.dot
 //
-// Top-level attractor pipeline for /think-like-ken: evidence-led design
-// refinement that interrupts the human only at genuine forks, then produces
-// one consolidated design review, one approval, and a written, self-reviewed
-// design document.
+// Same contract as the original fine-grained version (one design doc at
+// docs/plans/<date>-<topic>-design.md), rendered as a handful of large,
+// English-prompt phases instead of ~26 fine-grained mechanical nodes.
 //
-// Source of truth: modes/think-like-ken.md (the mode contract, verbatim
-// phase names and prompts below), skills/cranky-old-sam/SKILL.md,
-// skills/crusty-old-engineer/SKILL.md (persona lenses, rendered as
-// subgraphs), agents/design-writer.md.
+// PHILOSOPHY: the graph shows LOOPS AND GATES, not every internal step of a
+// phase. A phase node's prompt is the full instruction for that phase --
+// gather context, find forks, decide, synthesize, review -- exactly as a
+// human collaborator would be told to "go do phase 2," not walked through
+// it click by click. This trades some routing visibility (see
+// docs/designs/kenergy-pipeline-embedded-routing-logic.md, which argued the
+// opposite direction for the PREVIOUS version of this graph -- that design
+// was about eliminating HIDDEN forks buried in scripts, not about node
+// count; a phase node doing its own internal reasoning in prose is not the
+// same anti-pattern as a shell script silently branching on business
+// meaning) for a shape that reads like the mode's own prose almost
+// verbatim.
 //
-// DESIGN ORDER (docs/primer.md §3):
-//   1. THE SINK: a design document exists at docs/plans/<date>-<topic>-design.md,
-//      has passed a 4-point self-review (no placeholders, internally
-//      consistent, no scope creep, no ambiguity) AND an adversarial spec
-//      review (capped at 3 cycles), AND the human's own approval text was
-//      captured for the consolidated review that preceded it -- not assumed
-//      from silence or inferred from continuing the conversation.
-//   2. THE GATE: CheckSelfReview reads a JSON self-review result (not LLM
-//      prose); CheckConsolidatedApproval greps the human hexagon's own reply
-//      with fidelity="full" (per docs/RUBRIC.md §3.4 -- this is exactly the
-//      "human's freeform approval reply" case that carve-out exists for).
-//   3. THE LOOP: ResolveGenuineForks loops on itself until no user-only fork
-//      remains (mode's Phase 2, "end this phase as soon as no user-only fork
-//      remains" -- an unbounded-by-design loop since it's gated on a real
-//      state, not a fixed count). SelfReview/AdversarialReview loop back to
-//      revision, capped at 3 cycles per the mode's own "Run up to 3 review
-//      cycles maximum before proceeding."
-//   4. THE WORK NODES were written last: UnderstandContext, ResolveForks,
-//      SynthesizeDecisions (with optional inline persona-lens subgraphs),
-//      ConsolidatedReview, DelegateDesignWriter, SelfReview, AdversarialReview.
+// Source of truth: modes/think-like-ken.md (prompts ported near-verbatim,
+// same discipline build_like_ken.dot already uses for Implement/Reviewer).
 //
-// Foot-guns audited: no shape=diamond; ApprovalGate/SelfReviewGate/
-// AdversarialGate all route on files or fidelity="full" human replies, never
-// truncated $last_response prose; ResolveGenuineForks' loop is gated on an
-// observed "no_forks_remaining" file field, not on the box node simply
-// finishing talking.
+// What stays as separate nodes, and why (the only genuine structural forks
+// or delegation-substitutes):
+//   - ConsolidatedApproval: the ONLY human hexagon in this graph. Genuine
+//     forks (decisions only the human can make -- personal preference, or a
+//     fact only they know) are no longer a separate mid-pipeline pause. The
+//     model makes its best defensible assumption for each one, flags it
+//     explicitly in the consolidated review, and the human answers/corrects
+//     it in the SAME reply where they approve or revise -- ReviseDecisions
+//     already handles arbitrary corrections, so fork answers ride the same
+//     mechanism at zero extra cost. A prior version had a second hexagon
+//     (ResolveForks, gated by ForkGate reading forks.json) that stopped the
+//     pipeline mid-flight for forks specifically; collapsing that into the
+//     one approval checkpoint halves the number of places a run can sit
+//     waiting on a human reply, with no loss of "only a human can answer
+//     this" discipline.
+//   - WriteDesignDoc: acts directly in the design-writer role by reading
+//     $execution_root/.resolve/kenergy/agents/design-writer.md (staged by
+//     Bootstrap) rather than "delegating" to a named sub-agent --
+//     session.spawn-based delegation is not reliably available inside a
+//     Resolve worker container (confirmed via live investigation), and
+//     there is no `delegate=`/`agent=` DOT attribute and no way to mount
+//     Amplifier's own delegate() tool into a box node's session today (also
+//     confirmed). Inlining the persona is the correct, portable substitute
+//     for delegation -- not a shortcut.
+//   - ReviewCycle / ReviewCycleGate: kept separate specifically because
+//     their exit condition must be deterministic (see bump_cycle.py) --
+//     collapsing them into one phase would hide the review LOOP itself,
+//     which is exactly the kind of structure that should stay visible. The
+//     cycle count is tracked by an external script, never self-reported by
+//     the LLM into its own verdict file (a prior version of this bug let a
+//     model write {"cycle": 1} on its 14th iteration, defeating the cap).
 //
 // Context inputs:
-//   $topic - the idea/feature being designed
+//   $execution_root    - worktree/repo root all phases execute inside
+//   $kenergy_ref       - (optional) git ref of amplifier-bundle-kenergy to
+//                        bootstrap scripts/ + agent personas from; defaults
+//                        to "main".
 //
 // Context outputs:
-//   design.design_doc - path to the written, self-reviewed design document
+//   design.design_doc  - absolute path to the saved design document
 
 digraph think_like_ken {
   graph [
-    label="Think Like Ken -- evidence-led design refinement, genuine forks only",
-    goal="$topic",
+    label="Think Like Ken -- coarse phases, big English prompts",
     rankdir=LR,
     default_max_retry=3,
-    default_fidelity="summary:high",
+    default_fidelity="full",
     model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic; }"
   ];
 
   Start [shape=Mdiamond, label="Start"];
-  // --- Bootstrap: fetch amplifier-bundle-kenergy's scripts/ so downstream
-  // tool_command nodes can shell out to them by an addressable path. Needed
-  // because scripts/*.py never travels with a remotely-fetched .dot file
-  // (materialize_remote_dot only fetches dot_file= targets, never files
-  // referenced only inside a tool_command string), and a tool node's CWD in
-  // some execution environments (e.g. a Resolve worker) is the *target*
-  // workspace repo, not this repo -- so a bare relative "scripts/..." or
-  // "../../scripts/..." path is not reliably resolvable. Idempotent (skips
-  // the clone if already present) so re-running this node, or reaching it
-  // both standalone and nested under kenergy_full_cycle.dot, is harmless.
-  Bootstrap [
-    shape=parallelogram, label="Bootstrap Kenergy Scripts", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nfi\nmkdir -p \"$execution_root/.resolve/kenergy/agents\"\ncp \"$D/agents/design-writer.md\" \"$execution_root/.resolve/kenergy/agents/design-writer.md\"\ncp \"$D/agents/plan-writer.md\" \"$execution_root/.resolve/kenergy/agents/plan-writer.md\"\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
-  ];
   Exit  [shape=Msquare,  label="Exit"];
 
-  // Phase 1: Understand Context
-  UnderstandContext [
-    shape=box, fidelity="summary:high",
-    label="Understand Context (Phase 1)",
-    prompt="Topic: $topic\n\nBefore asking any question: check the current project state (files, docs, recent commits), read referenced documents or existing designs, gather relevant evidence, precedent, and research. State what you understand about the project context. Write $execution_root/.resolve/design/context.json with {\"summary\":\"...\",\"open_questions\":[...]} -- open_questions are candidate genuine user-only forks, not yet confirmed"
+  // --- Bootstrap: fetch amplifier-bundle-kenergy's scripts/ + stage agent
+  // persona files under $execution_root so downstream nodes can `cat` them
+  // by an addressable path (needed for the design-writer inline-persona
+  // pattern below). Idempotent (skips the clone if already present). ---
+  Bootstrap [
+    shape=parallelogram, label="Bootstrap Kenergy Scripts + Agent Personas", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\nREF=\"${kenergy_ref:-main}\"\nD=\"/tmp/kenergy-$REF\"\nif [ ! -d \"$D/.git\" ]; then\n  git clone --depth 1 --branch \"$REF\" https://github.com/kenotron-ms/amplifier-bundle-kenergy \"$D\" >&2\nelse\n  git -C \"$D\" fetch --depth 1 origin \"$REF\" >&2 && git -C \"$D\" reset --hard FETCH_HEAD >&2\nfi\nmkdir -p \"$execution_root/.resolve/kenergy/agents\"\ncp \"$D/agents/design-writer.md\" \"$execution_root/.resolve/kenergy/agents/design-writer.md\"\nprintf '{\"kenergy_root\":\"%s\"}' \"$D\""
   ];
 
-  // Deterministic gate (added per the goal_gate self-report audit): never
-  // trust "context_understood" report_outcome/text alone as proof
-  // UnderstandContext actually did the work -- confirmed live (the
-  // todoapp-attractor-pipeline run) that a model can call report_outcome
-  // zero times across 4/4 attempts while still producing plausible prose.
-  // This reads the FILE the prompt requires and checks it has the two
-  // required keys with real values, never the box node's own claim.
+  // --- Phase 1-2 collapsed: gather context AND identify genuine forks in
+  // one pass. Forks are recorded for transparency and for DecideAndReview
+  // to flag explicitly, but they no longer cause a separate mid-pipeline
+  // pause -- see header note on ConsolidatedApproval. ---
+  UnderstandAndIdentifyForks [
+    shape=box,
+    label="Understand Context + Identify Forks (Phases 1-2)",
+    prompt="Understand this codebase and the request well enough to design a solution. Read relevant code, git history, related prior designs, and any existing conventions. Then identify genuine forks -- decisions that only the human can make (personal preference, or a fact only they know) -- as distinct from decisions you can make yourself with evidence and precedent. Do not invent forks to be safe; only genuine ambiguity belongs here. Write $execution_root/.resolve/design/context.json with your understanding (evidence gathered, constraints found) and a \"forks\" array of {\"topic\":\"...\",\"question\":\"...\"} -- empty if none genuinely exist."
+  ];
+
   ContextArtifactGate [
-    shape=parallelogram, goal_gate=true, retry_target="UnderstandContext", label="Context Artifact Written?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json,sys\ntry:\n  d=json.load(open('${execution_root}/.resolve/design/context.json'))\n  ok = isinstance(d.get('summary'), str) and d['summary'].strip() != '' and isinstance(d.get('open_questions'), list)\nexcept Exception:\n  ok = False\nprint('ok' if ok else 'missing')\n\""
+    shape=parallelogram, goal_gate=true, retry_target="UnderstandAndIdentifyForks", label="Context Artifact Written?",
+    tool_command="#!/bin/sh\nset -e\np=\"${execution_root}/.resolve/design/context.json\"\nif [ -s \"$p\" ]; then printf 'ok'; else printf 'missing'; fi"
   ];
 
-  // Phase 2: Resolve Genuine User-Only Forks -- a real loop, gated on
-  // observed state ("no_forks_remaining"), not a fixed iteration count.
-  // Faithful to the mode's Phase 2: "Ask directly when the answer is a
-  // personal preference or a fact only the user knows. Batch related
-  // questions by topic... End this phase as soon as no user-only fork
-  // remains."
-  IdentifyForks [
-    shape=box, fidelity="summary:high",
-    label="Identify Remaining Genuine Forks",
-    prompt="Given the context in $execution_root/.resolve/design/context.json and any prior answers in $execution_root/.resolve/design/fork_answers.json (if it exists), list only the OPEN decisions that are genuine personal-preference questions or facts only the user knows -- not engineering questions with a defensible answer. Batch them by topic; never split one topic into micro-decisions. Write $execution_root/.resolve/design/forks.json with {\"has_forks\":true|false,\"forks\":[{\"topic\":\"...\",\"question\":\"...\"}]}"
-  ];
-
-  // parse_json="true" so the emitted "route" key drives ForkGate's own edges
-  // (unchanged behavior) while ALSO emitting a flat (non-dotted) fork_questions
-  // key with the actual human-readable question text. This second key exists
-  // because box/hexagon prompt= expansion (_expand_variables in codergen.py,
-  // reused by human.py's _expand_description) only ever expands bare, NON-
-  // DOTTED $key tokens via a literal string replace -- it never processes
-  // ${...} brace syntax at all, for ANY key, dotted or not. A prior fix
-  // assumed ${tool.last_output} just needed the token to exist in context;
-  // that's not the actual bug. The real bug is twofold: (1) tool.last_output
-  // is dotted, so it would never be expanded even as bare $tool.last_output,
-  // and (2) it only ever held ForkGate's own routing word ("has_forks"), never
-  // the real forks.json content -- so even fixing the token form wouldn't
-  // have surfaced the real questions. This was confirmed live: a Resolve
-  // instance parked on this exact node with the literal, unexpanded
-  // "${tool.last_output}" string as its only visible content, and the actual
-  // batched questions were unrecoverable from anywhere in the instance's
-  // exposed state (see incident notes in pipelines/README.md).
-  ForkGate [
-    shape=parallelogram, goal_gate=true, retry_target="IdentifyForks", label="Any Forks Remaining?", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\nd = json.load(open('${execution_root}/.resolve/design/forks.json'))\nif d['has_forks']:\n    lines = [f\\\"- [{f['topic']}] {f['question']}\\\" for f in d['forks']]\n    print(json.dumps({'route': 'has_forks', 'fork_questions': chr(10).join(lines)}))\nelse:\n    print(json.dumps({'route': 'no_forks'}))\n\""
-  ];
-
-  ResolveForks [
-    shape=hexagon, mode="freeform",
-    label="Resolve Genuine Forks",
-    prompt="These decisions genuinely need you -- either a personal preference or a fact only you know. They're batched by topic below; answer as many as you'd like in one reply.\n\n$fork_questions"
-  ];
-
-  RecordForkAnswers [
-    shape=parallelogram, label="Record Fork Answers",
-    tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/append_fork_answers.py --reply \"${last_response}\"\nprintf 'recorded'"
-  ];
-
-  // Phase 3: Synthesize Evidence-Backed Decisions, with an optional inline
-  // persona-lens sanity check -- these are subgraphs, not separate agent
-  // dispatches, matching the mode's explicit "embody an inline persona lens;
-  // do not dispatch it as a separate agent."
-  SynthesizeDecisions [
-    shape=box, fidelity="full",
-    label="Synthesize Evidence-Backed Decisions (Phase 3)",
-    prompt="For every remaining engineering decision with a defensible answer, decide directly using evidence, precedent, research, and the project's constraints. Apply YAGNI ruthlessly -- no speculative features. Record each choice and brief reasoning. Write $execution_root/.resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}], \"needs_simplicity_lens\":true|false, \"needs_consequence_lens\":true|false}"
-  ];
-
-  // Replaces the former combinatorial DecisionRoute (4-way case computed in
-  // python from two independent booleans, only 3 of 4 outcomes wired --
-  // "both" had no edge and would fail-loud at runtime). Two sequential
-  // 2-way boolean gates represent all 4 real combinations without any
-  // shell-side classification: each gate re-reads a single boolean already
-  // decided by SynthesizeDecisions, translation not decision (Q1 legitimate).
-  NeedsSimplicityLens [
-    shape=parallelogram, goal_gate=true, retry_target="SynthesizeDecisions", label="Needs Simplicity Lens?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/design/decisions.json'));print('true' if d['needs_simplicity_lens'] else 'false')\""
-  ];
-
-  NeedsConsequenceLens [
-    shape=parallelogram, goal_gate=true, retry_target="SynthesizeDecisions", label="Needs Consequence Lens?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;d=json.load(open('${execution_root}/.resolve/design/decisions.json'));print('true' if d['needs_consequence_lens'] else 'false')\""
-  ];
-
-  // `inputs="decisions_path"` was inert (PipelineHandler.execute() never
-  // reads `inputs=`) AND decisions_path itself was never actually set by any
-  // upstream node in this graph -- cosam_lens.dot/coe_lens.dot's own
-  // ${decisions_path} prompt token would have expanded to nothing.
-  // SynthesizeDecisions always writes to the fixed path
-  // .resolve/design/decisions.json, so seed it as a literal (folder
-  // context.<key> attrs are never substituted -- see build_like_ken.dot's
-  // DefineTaskCriteria note -- a literal path is exactly what belongs here).
-  SimplicityLens [
-    shape=folder, label="Cranky Old Sam Lens (simplicity)",
-    dot_file="subgraphs/cosam_lens.dot",
-    context.decisions_path=".resolve/design/decisions.json",
-    outputs="cosam.findings"
-  ];
-
-  ConsequenceLens [
-    shape=folder, label="Crusty Old Engineer Lens (consequences)",
-    dot_file="subgraphs/coe_lens.dot",
-    context.decisions_path=".resolve/design/decisions.json",
-    outputs="coe.findings"
-  ];
-
-  // Phase 4: Consolidated Final Design Review -- the mode's single
-  // pre-delegation approval gate. "Do not ask for section-level approval or
-  // create another approval checkpoint after it."
-  ConsolidatedReview [
-    shape=box, fidelity="full",
-    label="Consolidated Review (Phase 4)",
-    prompt="Present ONE consolidated review covering: the goal, recommended approach, key components, important trade-offs, evidence-backed decisions (from $execution_root/.resolve/design/decisions.json), any lens critique incorporated (${cosam.findings} ${coe.findings}), and any remaining genuine forks. This is the ONLY approval gate in this mode -- do not fragment it into sections. "
+  // --- Phase 3-4 collapsed: decide everything with a defensible answer
+  // (evidence, precedent, YAGNI), apply BOTH persona lenses inline as part
+  // of the same thinking pass (no separate NeedsSimplicityLens/
+  // NeedsConsequenceLens gates -- the prompt instructs the model to embody
+  // both perspectives itself, same "inline persona lens, do not dispatch as
+  // a separate agent" discipline the mode already requires elsewhere), and
+  // present ONE consolidated review. For any genuine fork found in Phase
+  // 1-2, make the best defensible assumption and flag it explicitly as an
+  // open question in the review -- the human resolves it (or corrects it)
+  // in the same reply as ConsolidatedApproval, not a separate pause. ---
+  DecideAndReview [
+    shape=box,
+    label="Decide + Apply Lenses + Consolidated Review (Phases 3-4)",
+    prompt="Using the context from $execution_root/.resolve/design/context.json, decide every remaining engineering decision with a defensible answer -- evidence, precedent, this project's own constraints. Apply YAGNI ruthlessly, no speculative features. For any genuine fork recorded in context.json, make your own best defensible assumption for now but flag it explicitly and clearly as an open question the human should confirm or correct. Then review your own recommendation from two angles before presenting it: (1) as a simplicity-obsessed reviewer who interrogates every abstraction and unnecessary layer, (2) as a systems engineer who has watched too many designs collapse under hidden consequences and unintended costs. Incorporate anything real either lens surfaces. Then present ONE consolidated review: goal, recommended approach, key components, important trade-offs, evidence-backed decisions, lens critique incorporated, and any flagged forks awaiting human confirmation. This is the ONLY approval gate in this mode -- do not fragment it into sections. Write $execution_root/.resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}]}."
   ];
 
   ConsolidatedApproval [
@@ -197,159 +119,98 @@ digraph think_like_ken {
     prompt="Above is the consolidated design review. Type approve/yes/ok to proceed to writing the design document, or reply with corrections to revise the recommendation first."
   ];
 
-  // fidelity="full" here overrides the graph default: this gate greps
-  // $last_response for approval keywords, and per docs/primer.md's foot-gun
-  // card #3, last_response truncates to 200 chars except under fidelity=full.
+  // fidelity="full" overrides the graph default here: this gate greps
+  // $last_response for approval keywords, which truncates to 200 chars
+  // except under fidelity=full.
   CheckConsolidatedApproval [
     shape=parallelogram, label="Check Consolidated Approval",
     tool_command="bash -c 'if echo \"$last_response\" | grep -iEq \"approve|\\byes\\b|\\bok\\b\"; then echo approved; else echo revise; fi'"
   ];
 
-  ReviseSynthesis [
-    shape=box, fidelity="full",
+  ReviseDecisions [
+    shape=box,
     label="Incorporate Corrections",
-    prompt="Incorporate the human's corrections ($last_response) into $execution_root/.resolve/design/decisions.json. "
+    prompt="Incorporate the human's corrections ($last_response) into $execution_root/.resolve/design/decisions.json, then re-present the consolidated review reflecting the changes."
   ];
 
-  // Phase 5: Delegate Design Document Creation -- mandatory delegation, the
-  // mode itself cannot write files (write_file/edit_file blocked structurally).
-  DelegateDesignWriter [
-    shape=box, fidelity="full",
-    label="Delegate to Design-Writer",
-    prompt="Follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/design-writer.md) exactly. Using that role, write the design document yourself now -- do not attempt to delegate or spawn a separate agent. Include the complete approved consolidated review and all resolved fork answers. Save to $execution_root/docs/plans/<date>-<topic>-design.md with: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Write $execution_root/.resolve/design/design_doc_path.txt with the saved path. "
+  // --- Phase 5: write the doc. Acts directly in the design-writer role by
+  // reading its persona file -- delegation substitute, see header note. ---
+  WriteDesignDoc [
+    shape=box,
+    label="Write Design Document (Phase 5)",
+    prompt="Follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/design-writer.md) exactly. Write the design document yourself now -- do not attempt to delegate or spawn a separate agent. Include the complete approved consolidated review and all resolved fork answers. Save to $execution_root/docs/plans/<date>-<topic>-design.md with: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Write $execution_root/.resolve/design/design_doc_path.txt with the saved path."
   ];
 
-  // Deterministic gate: DelegateDesignWriter's own report_outcome claim is
-  // not proof the design-writer subagent actually saved a file -- confirm
-  // the path it was supposed to write actually exists and the file it
-  // points at is non-empty before SelfReview reads it.
+  // Deterministic gate: WriteDesignDoc's own claim is not proof the file
+  // actually exists -- confirm the path it was supposed to write is real
+  // and non-empty before the review cycle reads it.
   DesignDocArtifactGate [
-    shape=parallelogram, goal_gate=true, retry_target="DelegateDesignWriter", label="Design Doc Actually Saved?",
+    shape=parallelogram, goal_gate=true, retry_target="WriteDesignDoc", label="Design Doc Actually Saved?",
     tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/design/design_doc_path.txt 2>/dev/null || true)\nif [ -n \"$path\" ] && [ -s \"$path\" ]; then printf 'ok'; else printf 'missing'; fi"
   ];
 
-  // Phase 6: Spec Self-Review -- 4-point checklist, then adversarial review,
-  // capped at 3 cycles.
-  SelfReview [
-    shape=box, fidelity="full",
-    label="Spec Self-Review (4-point checklist)",
-    prompt="Read the design document at $(cat $execution_root/.resolve/design/design_doc_path.txt). Check: (1) Placeholder scan -- no [TBD]/[TODO]/[FILL IN]/empty sections; (2) Internal consistency -- component names, data flows, interfaces align throughout; (3) Scope check -- every item traces to a user requirement, nothing extra snuck in; (4) Ambiguity check -- no vague terms like 'handle errors appropriately' without specifics. Write $execution_root/.resolve/design/self_review.json with {\"pass\":true|false,\"issues\":[...]}"
+  // --- Phase 6: review loop -- kept as its own visible LOOP (this is
+  // exactly the kind of structure the graph SHOULD show). Self-review +
+  // adversarial review folded into one prompt per cycle; fixes made
+  // in-role directly (delegation substitute, same as WriteDesignDoc).
+  // Deterministic cap via bump_cycle.py -- see header note. ---
+  ReviewCycle [
+    shape=box,
+    label="Self + Adversarial Review (one cycle)",
+    prompt="Read the design document at $(cat $execution_root/.resolve/design/design_doc_path.txt). First, self-review: no placeholders/TODOs, internal consistency, every item traces to a real requirement, no vague language. Then dispatch an adversarial review of the same document using the prompt at kenergy:context/spec-document-review-prompt.md. If either review finds issues, fix them directly in the document now -- follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/design-writer.md) exactly, do not attempt to delegate or spawn a separate agent. Write $execution_root/.resolve/design/review_result.json with {\"pass\":true|false,\"issues\":[...]}."
   ];
 
-  SelfReviewGate [
-    shape=parallelogram, goal_gate=true, retry_target="SelfReview", label="Self-Review Pass?",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print('pass' if json.load(open('${execution_root}/.resolve/design/self_review.json'))['pass'] else 'fail')\""
-  ];
-
-  FixSelfReview [
-    shape=box, fidelity="full",
-    label="Re-delegate Corrections",
-    prompt="Follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/design-writer.md) exactly. Using that role, fix the specific issues from $execution_root/.resolve/design/self_review.json directly in the design document -- do not attempt to delegate or spawn a separate agent. "
-  ];
-
-  AdversarialReview [
-    shape=box, fidelity="full",
-    label="Antagonistic Spec Review",
-    prompt="Dispatch an adversarial review of $(cat $execution_root/.resolve/design/design_doc_path.txt) using the prompt at kenergy:context/spec-document-review-prompt.md. Write $execution_root/.resolve/design/adversarial_review.json with {\"pass\":true|false,\"findings\":[...],\"cycle\":<int>}. "
-  ];
-
-  // Cycle count is now tracked DETERMINISTICALLY by scripts/bump_cycle.py,
-  // not self-reported by the LLM into adversarial_review.json. A prior
-  // version had AdversarialReview write its own "cycle" key alongside its
-  // pass/fail verdict, and the gate read `d['cycle'] >= 3` from that
-  // self-authored value -- a value the loop body itself invents is not a
-  // cap. Observed in production: at execution #14 the model wrote
-  // {"cycle": 1} again, so the cap never tripped (27 SelfReview + 17
-  // AdversarialReview + 27 FixSelfReview executions over ~80 minutes in one
-  // Resolve run). bump_cycle.py increments a plain integer file outside the
-  // model's own JSON write, exactly once per AdversarialGate execution
-  // (which runs exactly once per full loop iteration). The model's
-  // "pass"/"fail" verdict is still read from its own JSON -- that's a
-  // legitimate judgment call, not a loop-bound counter -- only the count
-  // that gates the bound is no longer self-reported.
-  AdversarialGate [
-    shape=parallelogram, goal_gate=true, retry_target="AdversarialReview", label="Adversarial Review Pass or Cap Reached?",
-    tool_command="#!/bin/sh\nset -e\ncycle=$(python3 ${kenergy_root}/scripts/bump_cycle.py --state-file \"${execution_root}/.resolve/design/adversarial_cycle.count\" | python3 -c \"import json,sys;print(json.load(sys.stdin)['cycle'])\")\npython3 -c \"\nimport json\nd=json.load(open('${execution_root}/.resolve/design/adversarial_review.json'))\ncycle=$cycle\nif d['pass']: print('pass')\nelif cycle >= 3: print('cap_reached')\nelse: print('revise')\n\""
+  // Cycle count is tracked DETERMINISTICALLY by scripts/bump_cycle.py, not
+  // self-reported by the LLM into its own verdict file. Increments exactly
+  // once per ReviewCycleGate execution (which runs exactly once per full
+  // loop iteration). The model's pass/fail verdict is still read from its
+  // own JSON -- that is a legitimate judgment call, not a loop-bound
+  // counter -- only the count that gates the bound is external.
+  ReviewCycleGate [
+    shape=parallelogram, goal_gate=true, retry_target="ReviewCycle", label="Review Pass or Cap Reached?",
+    tool_command="#!/bin/sh\nset -e\ncycle=$(python3 ${kenergy_root}/scripts/bump_cycle.py --state-file \"${execution_root}/.resolve/design/review_cycle.count\" | python3 -c \"import json,sys;print(json.load(sys.stdin)['cycle'])\")\npython3 -c \"\nimport json\nd=json.load(open('${execution_root}/.resolve/design/review_result.json'))\ncycle=$cycle\nif d['pass']: print('pass')\nelif cycle >= 3: print('cap_reached')\nelse: print('revise')\n\""
   ];
 
   // Report-only: this pipeline's sink is exactly one artifact (a design
-  // document -- see header section 1). It must not hint at, suggest, or imply any
-  // next step, including naming /plan-like-ken or "implementation planning."
-  // A prior version's prompt ("...ready for implementation planning.") was
-  // declarative prose with no instruction verb, handed to a shape=box node
-  // with full tool access -- the model read it as a task and wrote an
-  // unrequested full implementation plan alongside the design doc. Made
-  // deterministic (no LLM) since there is nothing to decide: it only prints
-  // a fixed, already-known path.
+  // document). Deterministic (no LLM) -- must not hint at, suggest, or
+  // imply any next step, including naming /plan-like-ken or "implementation
+  // planning." If a user wants the full think->plan->build->verify->finish
+  // flow, that is what kenergy_full_cycle is for; this standalone pipeline
+  // should not try to route them toward it.
   Report [
     shape=parallelogram, label="Report Final Artifact",
     tool_command="#!/bin/sh\nset -e\npath=$(cat $execution_root/.resolve/design/design_doc_path.txt)\nprintf 'Design document saved to %s. Design phase complete.\\n' \"$path\""
   ];
 
-  Start                     -> Bootstrap;
-  Bootstrap                 -> UnderstandContext;
-  UnderstandContext           -> ContextArtifactGate;
-  ContextArtifactGate         -> IdentifyForks       [condition="context.tool.last_line=ok", weight="2"];
-  ContextArtifactGate         -> UnderstandContext    [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=3"];
-  IdentifyForks               -> ForkGate;
-  // Edges compare context.route (the parse_json-merged key), not
-  // context.tool.last_line -- ForkGate's tool_command prints a JSON object
-  // ({"route": "has_forks"|"no_forks", ...}), not a bare word, so
-  // tool.last_line is the literal JSON text and can never equal "has_forks"/
-  // "no_forks". This edge never matched in production (confirmed live via a
-  // Resolve instance: IdentifyForks->ForkGate looped 51 times over ~30
-  // minutes before a no_matching_edge hard failure). parse_json="true"
-  // merges the JSON's top-level keys directly into flat context, so
-  // context.route is the correct comparison target -- same pattern already
-  // used correctly by ConfirmMergeLanded/ConfirmPROpened (finish.dot) and
-  // OverallGate/CheckRetryCount (verify.dot).
-  ForkGate                    -> ResolveForks         [condition="context.route=has_forks"];
-  ForkGate                    -> SynthesizeDecisions  [condition="context.route=no_forks", weight="2"];
-  ResolveForks                -> RecordForkAnswers     [fidelity="full"];
-  RecordForkAnswers           -> IdentifyForks         [loop_restart="true", label="re-check for new forks"];
-
-  SynthesizeDecisions         -> NeedsSimplicityLens;
-  NeedsSimplicityLens           -> SimplicityLens        [condition="context.tool.last_line=true"];
-  NeedsSimplicityLens           -> NeedsConsequenceLens  [condition="context.tool.last_line=false", weight="2"];
-  SimplicityLens                -> NeedsConsequenceLens;
-  NeedsConsequenceLens          -> ConsequenceLens       [condition="context.tool.last_line=true"];
-  NeedsConsequenceLens          -> ConsolidatedReview    [condition="context.tool.last_line=false", weight="2"];
-  ConsequenceLens                -> ConsolidatedReview;
-
-  ConsolidatedReview            -> ConsolidatedApproval;
-  ConsolidatedApproval          -> CheckConsolidatedApproval [fidelity="full"];
-  CheckConsolidatedApproval     -> DelegateDesignWriter [condition="context.tool.last_line=approved", weight="2"];
-  CheckConsolidatedApproval     -> ReviseSynthesis      [condition="context.tool.last_line=revise"];
-  ReviseSynthesis               -> ConsolidatedReview   [loop_restart="true"];
-  DelegateDesignWriter            -> DesignDocArtifactGate;
-  DesignDocArtifactGate           -> SelfReview             [condition="context.tool.last_line=ok", weight="2"];
-  DesignDocArtifactGate           -> DelegateDesignWriter    [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- doc not actually saved, bounded by default_max_retry=3"];
-  SelfReview                     -> SelfReviewGate;
-  SelfReviewGate                 -> AdversarialReview   [condition="context.tool.last_line=pass", weight="2"];
-  SelfReviewGate                 -> FixSelfReview        [condition="context.tool.last_line=fail"];
-  FixSelfReview                   -> SelfReview          [loop_restart="true"];
-  AdversarialReview                -> AdversarialGate;
-  AdversarialGate                  -> Report             [condition="context.tool.last_line=pass", weight="2"];
-  AdversarialGate                  -> Report             [condition="context.tool.last_line=cap_reached", label="3-cycle cap reached -- proceed with residual findings noted"];
-  AdversarialGate                  -> FixSelfReview        [condition="context.tool.last_line=revise"];
-
-
-  // Bridge: ThinkLikeKen's parent (kenergy_full_cycle.dot) declares
-  // outputs="design.design_doc" on this subgraph's folder node, but no node
-  // above ever emits a flat `design_doc` context key -- only a FILE at
-  // .resolve/design/design_doc_path.txt. A folder node's outputs= merge only
-  // promotes keys that actually exist in the child's final context, so
-  // without this node context.design.design_doc is never set in the parent,
-  // and RenameDesignDocForPlan's ${design.design_doc} substitution is left
-  // as a literal unexpanded token -- which the shell then chokes on ("Bad
-  // substitution", since dots aren't valid in bash variable names). Emits
-  // the file's contents as the flat key this graph's own outputs contract
-  // promises.
+  // --- Bridge: emits the flat design_doc context key from the file, since
+  // no node above writes it as flat context directly -- only to a file. A
+  // folder node's outputs= merge only promotes keys that actually exist in
+  // the child's final context. ---
   EmitDesignDocOutput [
-    shape=parallelogram, parse_json="true", label="Emit design_doc for parent context",
+    shape=parallelogram, label="Emit design.design_doc Output",
     tool_command="#!/bin/sh\nset -e\npath=$(cat ${execution_root}/.resolve/design/design_doc_path.txt)\npython3 -c \"import json;print(json.dumps({'design.design_doc': '$path'}))\""
   ];
 
-  Report                            -> EmitDesignDocOutput;
-  EmitDesignDocOutput                -> Exit;
+  Start                        -> Bootstrap;
+  Bootstrap                    -> UnderstandAndIdentifyForks;
+  UnderstandAndIdentifyForks   -> ContextArtifactGate;
+  ContextArtifactGate          -> DecideAndReview  [condition="context.tool.last_line=ok", weight="2"];
+  ContextArtifactGate          -> UnderstandAndIdentifyForks [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact missing/malformed, bounded by default_max_retry=3"];
+
+  DecideAndReview                -> ConsolidatedApproval;
+  ConsolidatedApproval           -> CheckConsolidatedApproval [fidelity="full"];
+  CheckConsolidatedApproval      -> WriteDesignDoc  [condition="context.tool.last_line=approved", weight="2"];
+  CheckConsolidatedApproval      -> ReviseDecisions [condition="context.tool.last_line=revise"];
+  ReviseDecisions                -> ConsolidatedApproval [loop_restart="true"];
+
+  WriteDesignDoc                 -> DesignDocArtifactGate;
+  DesignDocArtifactGate          -> ReviewCycle       [condition="context.tool.last_line=ok", weight="2"];
+  DesignDocArtifactGate          -> WriteDesignDoc    [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- doc not actually saved, bounded by default_max_retry=3"];
+  ReviewCycle                    -> ReviewCycleGate;
+  ReviewCycleGate                -> Report      [condition="context.tool.last_line=pass", weight="2"];
+  ReviewCycleGate                -> Report      [condition="context.tool.last_line=cap_reached", label="3-cycle cap reached -- proceed with residual findings noted"];
+  ReviewCycleGate                -> ReviewCycle [condition="context.tool.last_line=revise"];
+
+  Report -> EmitDesignDocOutput;
+  EmitDesignDocOutput -> Exit;
 }
