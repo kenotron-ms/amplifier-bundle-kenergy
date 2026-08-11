@@ -105,11 +105,30 @@ digraph kenergy_full_cycle {
   // but `context.<key>` folder attrs are never substituted by the engine
   // (only tool_command/prompt/description/tool_env are), so a literal
   // context.design_doc="context.design.design_doc" would inject that literal
-  // STRING, not the design doc path. A deterministic tool node bridges the
-  // rename via parse_json="true" instead.
+  // STRING, not the design doc path.
+  //
+  // Live-confirmed bug (2026-08-11): the previous version of this node
+  // substituted `${design.design_doc}` directly into a python -c string.
+  // When that context key isn't present at exactly this moment (folder-node
+  // outputs= promotion across a subgraph boundary is exactly the class of
+  // thing that has broken silently before in this pipeline suite -- see
+  // this file's other missing-writer-bug fixes), the engine's substitution
+  // leaves the token COMPLETELY LITERAL rather than erroring -- and since
+  // POSIX sh variable names cannot contain dots, /bin/sh then chokes on the
+  // literal text with "Bad substitution" (exit code 2), a confusing shell
+  // parse error rather than a clean "key missing" signal.
+  //
+  // Fix: don't depend on cross-subgraph context substitution for this
+  // bridge at all. Read the design doc path directly from the pointer file
+  // think_like_ken.dot's WriteDesignDoc node already writes (and which is
+  // now must_write=-guarded there) -- the same "verify real state, don't
+  // trust propagated context" discipline already used by every
+  // *ArtifactGate node in these pipelines. $execution_root itself is NOT a
+  // dotted key and substitutes reliably (used this way throughout every
+  // pipeline in this suite without issue).
   RenameDesignDocForPlan [
-    shape=parallelogram, label="Bridge design.design_doc -> design_doc", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.dumps({'design_doc': '${design.design_doc}'}))\""
+    shape=parallelogram, label="Bridge design_doc_path.txt -> design_doc", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npath=$(cat \"${execution_root}/.resolve/design/design_doc_path.txt\")\npython3 -c \"import json,sys;print(json.dumps({'design_doc': sys.argv[1]}))\" \"$path\""
   ];
 
   PlanLikeKen [
@@ -123,9 +142,16 @@ digraph kenergy_full_cycle {
   // plan.plan_doc PlanLikeKen's own outputs= merge produced.
   // $execution_root itself needs no bridge -- it is this graph's own
   // top-level param and already flows through via clone (same flat name).
+  //
+  // Same live-confirmed "Bad substitution" bug class as
+  // RenameDesignDocForPlan above (see that node's comment for the full
+  // root-cause writeup) -- fixed the same way: read the plan path directly
+  // from the pointer file plan_like_ken.dot's DelegatePlanWriter node
+  // already writes, instead of depending on cross-subgraph context
+  // substitution of a dotted key.
   RenamePlanDocForBuild [
-    shape=parallelogram, label="Bridge plan.plan_doc -> plan_path", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\npython3 -c \"import json;print(json.dumps({'plan_path': '${plan.plan_doc}'}))\""
+    shape=parallelogram, label="Bridge plan_path.txt -> plan_path", parse_json="true",
+    tool_command="#!/bin/sh\nset -e\npath=$(cat \"${execution_root}/.resolve/plan/plan_path.txt\")\npython3 -c \"import json,sys;print(json.dumps({'plan_path': sys.argv[1]}))\" \"$path\""
   ];
 
   BuildLikeKen [
