@@ -134,10 +134,22 @@ digraph think_like_ken {
   ];
 
   // --- Phase 5: write the doc. Acts directly in the design-writer role by
-  // reading its persona file -- delegation substitute, see header note. ---
+  // reading its persona file -- delegation substitute, see header note.
+  // must_write= is a belt-and-suspenders backstop on top of
+  // DesignDocArtifactGate below, per the upstream amplifier-bundle-attractor
+  // pattern (specs/EXTENSIONS.md \u00a727, task-runner.dot's postmortem node):
+  // engine-enforced proof this node produced a fresh, non-trivial file THIS
+  // attempt (mtime > node start, non-whitespace content), checked inside
+  // the retry ladder and non-overridable even by a future continue_on_fail.
+  // Points at the fixed pointer file (design_doc_path.txt), not the dynamic
+  // <date>-<topic>-design.md filename, since must_write= needs a path known
+  // at graph-authoring time -- the pointer file is exactly what
+  // DesignDocArtifactGate already validates, so this checks the same fact
+  // via an independent mechanism rather than replacing the gate. ---
   WriteDesignDoc [
     shape=box,
     label="Write Design Document (Phase 5)",
+    must_write="${execution_root}/.resolve/design/design_doc_path.txt",
     prompt="Follow the role defined in $(cat $execution_root/.resolve/kenergy/agents/design-writer.md) exactly. Write the design document yourself now -- do not attempt to delegate or spawn a separate agent. Include the complete approved consolidated review and all resolved fork answers. Save to $execution_root/docs/plans/<date>-<topic>-design.md with: goal, chosen approach, architecture, components, data flow, error handling, testing strategy, open questions. Write $execution_root/.resolve/design/design_doc_path.txt with the saved path."
   ];
 
