@@ -71,7 +71,7 @@ digraph verify {
   ];
 
   // Deterministic gate: confirm conventions.json actually exists and is
-  // well-formed before GatherRepoGateEvidence (Check 4) relies on it later
+  // well-formed before GatherRemainingEvidence (Check 4) relies on it later
   // -- never trust RepoConventionsDiscovery's own "conventions_discovered"
   // claim.
   ConventionsArtifactGate [
@@ -97,38 +97,28 @@ digraph verify {
     outputs="scenario.result,scenario.report_path"
   ];
 
-  // Check 2: Behavior Verified -- reproduce the specific claim, not a
-  // general smoke test.
-  GatherBehaviorEvidence [
+  // Checks 2-4 collapsed into one phase: Behavior, Edge Cases, and
+  // Repo-Specific Gates are three small sequential LLM calls that only
+  // rejoined at ChecksArtifactGate anyway -- same over-decomposition
+  // pattern already fixed in think_like_ken.dot (see that file's header for
+  // the philosophy). Check 1 stays separate because its output structurally
+  // forks the graph (UIRoute); these three don't fork anything, so one
+  // English prompt does all three and writes all three files.
+  GatherRemainingEvidence [
     shape=box, fidelity="full",
-    label="Check 2: Behavior Verified",
-    prompt="For new features: demonstrate the feature works with a concrete example and capture the output. For bug fixes: reproduce the ORIGINAL bug scenario and show it's fixed. For refactors: show behavior is unchanged. Write $execution_root/.resolve/verify/check2.json with {\"scenario\":\"...\",\"evidence\":\"...\",\"passed\":true|false}. "
-  ];
-
-  // Check 3: Edge Cases and Regressions.
-  GatherEdgeCaseEvidence [
-    shape=box, fidelity="full",
-    label="Check 3: Edge Cases",
-    prompt="Run the linter/type checker. Check for obvious regressions in related functionality. Verify error handling with bad/missing input. Write $execution_root/.resolve/verify/check3.json with {\"linter\":\"...\",\"type_checker\":\"...\",\"edge_case_tested\":\"...\",\"passed\":true|false}. "
-  ];
-
-  // Check 4: Repo-Specific Gates -- only meaningful when conventions exist.
-  GatherRepoGateEvidence [
-    shape=box, fidelity="full",
-    label="Check 4: Repo-Specific Gates",
-    prompt="Using $execution_root/.resolve/verify/conventions.json, confirm every AGENTS.md gate and every PR-template checklist item is addressed by evidence already gathered above -- not waved off. Write $execution_root/.resolve/verify/check4.json with {\"gates_satisfied\":true|false,\"unaddressed\":[...]}. "
+    label="Checks 2-4: Behavior, Edge Cases, Repo Gates",
+    prompt="Gather evidence for three checks in one pass:\n\n(2) Behavior Verified -- reproduce the specific claim, not a general smoke test. For new features: demonstrate the feature works with a concrete example and capture the output. For bug fixes: reproduce the ORIGINAL bug scenario and show it's fixed. For refactors: show behavior is unchanged. Write $execution_root/.resolve/verify/check2.json with {\"scenario\":\"...\",\"evidence\":\"...\",\"passed\":true|false}.\n\n(3) Edge Cases and Regressions -- run the linter/type checker, check for obvious regressions in related functionality, verify error handling with bad/missing input. Write $execution_root/.resolve/verify/check3.json with {\"linter\":\"...\",\"type_checker\":\"...\",\"edge_case_tested\":\"...\",\"passed\":true|false}.\n\n(4) Repo-Specific Gates -- using $execution_root/.resolve/verify/conventions.json, confirm every AGENTS.md gate and every PR-template checklist item is addressed by evidence already gathered above (Check 1 and Checks 2-3) -- not waved off. Only meaningful when conventions exist. Write $execution_root/.resolve/verify/check4.json with {\"gates_satisfied\":true|false,\"unaddressed\":[...]}."
   ];
 
   // Deterministic gate (added per the goal_gate self-report audit): confirm
-  // all four Gather*Evidence box nodes actually wrote well-formed check
-  // files before handing off to the holistic HoldOverallClaimToBar judgment
-  // -- never trust "check1_done"/"check2_done"/etc. report_outcome claims
-  // alone. This is the same class of live-confirmed bug as
-  // think_like_ken.dot's UnderstandContext (a goal_gate node can call
-  // report_outcome zero times across every retry while still emitting
-  // plausible prose).
+  // all four check files actually got written well-formed before handing
+  // off to the holistic HoldOverallClaimToBar judgment -- never trust
+  // "check1_done"/"check2_done"/etc. report_outcome claims alone. This is
+  // the same class of live-confirmed bug as think_like_ken.dot's
+  // UnderstandContext (a goal_gate node can call report_outcome zero times
+  // across every retry while still emitting plausible prose).
   ChecksArtifactGate [
-    shape=parallelogram, goal_gate=true, retry_target="GatherRepoGateEvidence", label="All Four Check Files Well-Formed?",
+    shape=parallelogram, goal_gate=true, retry_target="GatherRemainingEvidence", label="All Four Check Files Well-Formed?",
     tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\ndef ok(path, keys):\n    try:\n        d=json.load(open(path))\n        return all(k in d for k in keys)\n    except Exception:\n        return False\nresults = [\n    ok('${execution_root}/.resolve/verify/check1.json', ['command','output','passed']),\n    ok('${execution_root}/.resolve/verify/check2.json', ['scenario','evidence','passed']),\n    ok('${execution_root}/.resolve/verify/check3.json', ['linter','type_checker','passed']),\n    ok('${execution_root}/.resolve/verify/check4.json', ['gates_satisfied']),\n]\nprint('ok' if all(results) else 'missing')\n\""
   ];
 
@@ -190,14 +180,12 @@ digraph verify {
   ConventionsArtifactGate      -> RepoConventionsDiscovery     [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written or malformed, bounded by default_max_retry=2"];
   GatherImplementationEvidence -> UIRoute;
   UIRoute                      -> ScenarioVerification [condition="context.tool.last_line=ui"];
-  UIRoute                      -> GatherBehaviorEvidence [condition="context.tool.last_line=not_ui", weight="2"];
-  ScenarioVerification          -> GatherBehaviorEvidence;
+  UIRoute                      -> GatherRemainingEvidence [condition="context.tool.last_line=not_ui", weight="2"];
+  ScenarioVerification          -> GatherRemainingEvidence;
 
-  GatherBehaviorEvidence        -> GatherEdgeCaseEvidence;
-  GatherEdgeCaseEvidence         -> GatherRepoGateEvidence;
-  GatherRepoGateEvidence          -> ChecksArtifactGate;
+  GatherRemainingEvidence          -> ChecksArtifactGate;
   ChecksArtifactGate               -> HoldOverallClaimToBar    [condition="context.tool.last_line=ok", weight="2"];
-  ChecksArtifactGate               -> GatherRepoGateEvidence   [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- one or more check files missing/malformed, bounded by default_max_retry=2"];
+  ChecksArtifactGate               -> GatherRemainingEvidence  [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- one or more check files missing/malformed, bounded by default_max_retry=2"];
   HoldOverallClaimToBar           -> OverallGate;
 
   OverallGate                     -> Report               [condition="context.route=proven", weight="2"];
