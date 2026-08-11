@@ -20,21 +20,20 @@
 // Source of truth: modes/think-like-ken.md (prompts ported near-verbatim,
 // same discipline build_like_ken.dot already uses for Implement/Reviewer).
 //
+// ZERO human checkpoints (2026-08-11 revision): ConsolidatedApproval (the
+// prior sole human hexagon) has been removed. DecideAndReview now proceeds
+// straight to WriteDesignDoc -- no pause. Genuine forks (decisions only a
+// human could ideally make) are resolved by the model making its own best
+// defensible assumption and recording it plainly in decisions.json, not by
+// stopping to ask. Philosophy: earn the right to interrupt a human by
+// shipping fully-autonomous runs first; human checkpoints get reintroduced
+// deliberately later if real failure modes demonstrate they're needed, not
+// kept by default "just in case." A prior version had TWO hexagons
+// (ResolveForks + ConsolidatedApproval); this revision removes the second
+// one too rather than keeping either.
+//
 // What stays as separate nodes, and why (the only genuine structural forks
 // or delegation-substitutes):
-//   - ConsolidatedApproval: the ONLY human hexagon in this graph. Genuine
-//     forks (decisions only the human can make -- personal preference, or a
-//     fact only they know) are no longer a separate mid-pipeline pause. The
-//     model makes its best defensible assumption for each one, flags it
-//     explicitly in the consolidated review, and the human answers/corrects
-//     it in the SAME reply where they approve or revise -- ReviseDecisions
-//     already handles arbitrary corrections, so fork answers ride the same
-//     mechanism at zero extra cost. A prior version had a second hexagon
-//     (ResolveForks, gated by ForkGate reading forks.json) that stopped the
-//     pipeline mid-flight for forks specifically; collapsing that into the
-//     one approval checkpoint halves the number of places a run can sit
-//     waiting on a human reply, with no loss of "only a human can answer
-//     this" discipline.
 //   - WriteDesignDoc: acts directly in the design-writer role by reading
 //     $execution_root/.resolve/kenergy/agents/design-writer.md (staged by
 //     Bootstrap) rather than "delegating" to a named sub-agent --
@@ -110,27 +109,7 @@ digraph think_like_ken {
   DecideAndReview [
     shape=box,
     label="Decide + Apply Lenses + Consolidated Review (Phases 3-4)",
-    prompt="Using the context from $execution_root/.resolve/design/context.json, decide every remaining engineering decision with a defensible answer -- evidence, precedent, this project's own constraints. Apply YAGNI ruthlessly, no speculative features. For any genuine fork recorded in context.json, make your own best defensible assumption for now but flag it explicitly and clearly as an open question the human should confirm or correct. Then review your own recommendation from two angles before presenting it: (1) as a simplicity-obsessed reviewer who interrogates every abstraction and unnecessary layer, (2) as a systems engineer who has watched too many designs collapse under hidden consequences and unintended costs. Incorporate anything real either lens surfaces. Then present ONE consolidated review: goal, recommended approach, key components, important trade-offs, evidence-backed decisions, lens critique incorporated, and any flagged forks awaiting human confirmation. This is the ONLY approval gate in this mode -- do not fragment it into sections. Write $execution_root/.resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}]}."
-  ];
-
-  ConsolidatedApproval [
-    shape=hexagon, mode="freeform",
-    label="Explicit Design Approval",
-    prompt="Above is the consolidated design review. Type approve/yes/ok to proceed to writing the design document, or reply with corrections to revise the recommendation first."
-  ];
-
-  // fidelity="full" overrides the graph default here: this gate greps
-  // $last_response for approval keywords, which truncates to 200 chars
-  // except under fidelity=full.
-  CheckConsolidatedApproval [
-    shape=parallelogram, label="Check Consolidated Approval",
-    tool_command="bash -c 'if echo \"$last_response\" | grep -iEq \"approve|\\byes\\b|\\bok\\b\"; then echo approved; else echo revise; fi'"
-  ];
-
-  ReviseDecisions [
-    shape=box,
-    label="Incorporate Corrections",
-    prompt="Incorporate the human's corrections ($last_response) into $execution_root/.resolve/design/decisions.json, then re-present the consolidated review reflecting the changes."
+    prompt="Using the context from $execution_root/.resolve/design/context.json, decide every remaining engineering decision with a defensible answer -- evidence, precedent, this project's own constraints. Apply YAGNI ruthlessly, no speculative features. For any genuine fork recorded in context.json, make your own best defensible assumption and record it plainly with your reasoning -- there is no human checkpoint to defer to here, so a real decision is required, not an open question. Then review your own recommendation from two angles before finalizing it: (1) as a simplicity-obsessed reviewer who interrogates every abstraction and unnecessary layer, (2) as a systems engineer who has watched too many designs collapse under hidden consequences and unintended costs. Incorporate anything real either lens surfaces. Write $execution_root/.resolve/design/decisions.json with {\"decisions\":[{\"question\":\"...\",\"choice\":\"...\",\"reasoning\":\"...\"}]}."
   ];
 
   // --- Phase 5: write the doc. Acts directly in the design-writer role by
@@ -209,11 +188,7 @@ digraph think_like_ken {
   ContextArtifactGate          -> DecideAndReview  [condition="context.tool.last_line=ok", weight="2"];
   ContextArtifactGate          -> UnderstandAndIdentifyForks [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact missing/malformed, bounded by default_max_retry=3"];
 
-  DecideAndReview                -> ConsolidatedApproval;
-  ConsolidatedApproval           -> CheckConsolidatedApproval [fidelity="full"];
-  CheckConsolidatedApproval      -> WriteDesignDoc  [condition="context.tool.last_line=approved", weight="2"];
-  CheckConsolidatedApproval      -> ReviseDecisions [condition="context.tool.last_line=revise"];
-  ReviseDecisions                -> ConsolidatedApproval [loop_restart="true"];
+  DecideAndReview                 -> WriteDesignDoc;
 
   WriteDesignDoc                 -> DesignDocArtifactGate;
   DesignDocArtifactGate          -> ReviewCycle       [condition="context.tool.last_line=ok", weight="2"];

@@ -14,13 +14,27 @@
 // Naming note: this mirrors recipes/kenergy-full-development-cycle.yaml's
 // name deliberately -- same lifecycle, DOT rendering instead of recipe YAML.
 //
+// Zero human checkpoints (2026-08-11 revision): this graph previously had
+// two top-level human hexagons -- ResumeRoute (after Debug, "where do we
+// resume") and RecommendVerify ("run /verify or skip to /finish"). Both are
+// removed. ResumeRoute's judgment is now made by Debug itself: the root
+// cause investigation already determines whether the fix is local
+// (continue_build), the plan needs revision (replan), or the design itself
+// was wrong (redesign) -- Debug's own report now states which, and a
+// deterministic gate routes on that instead of asking. RecommendVerify's
+// choice is no longer offered: /verify always runs (it was already the
+// documented recommended default; removing the choice just makes the
+// recommendation the only path, matching this session's stance that a
+// pipeline should default to the more-thorough option rather than pause to
+// ask which one to take).
+//
 // DESIGN ORDER (docs/primer.md §3):
-//   1. THE SINK: `finish.dot`'s own sink (a confirmed merge/PR/keep/discard
-//      action) -- but only reachable after every upstream stage's own sink
-//      was independently satisfied: think_like_ken's approved+self-reviewed
-//      design, plan_like_ken's contract-confirmed plan, build_like_ken's
-//      all-tasks-accepted-or-explicitly-blocked verdict, and (when run)
-//      verify's proven-not-asserted evidence.
+//   1. THE SINK: `finish.dot`'s own sink (a confirmed, human-reviewable PR
+//      opened) -- but only reachable after every upstream stage's own sink
+//      was independently satisfied: think_like_ken's self-reviewed design,
+//      plan_like_ken's contract-confirmed plan, build_like_ken's
+//      all-tasks-accepted-or-explicitly-blocked verdict, and verify's
+//      proven-not-asserted evidence (always run now, not optional).
 //   2. THE GATE: per docs/RUBRIC.md §3.7, a `shape=folder` subgraph node
 //      silently returns its LAST internal outcome to the parent graph even
 //      when nothing meaningful happened inside it -- so this graph never
@@ -33,12 +47,11 @@
 //      a blocked build and unverified evidence are different failure
 //      classes, but both genuinely need root-cause investigation, so both
 //      route to the same investigation phase rather than each inventing a
-//      bespoke patch path). ResumeRoute is a human hexagon after Debug
-//      because "where do we resume" is a genuine judgment call debug.md's
-//      own Dynamic Transitions section leaves to a human, not something a
-//      deterministic gate can decide from file state alone.
+//      bespoke patch path). Debug's own report now names the resume point
+//      (continue_build/replan/redesign) as part of its terminal output --
+//      CheckResumeRoute reads that deterministically rather than asking.
 //   4. THE WORK NODES were written last: the six folder nodes plus the two
-//      verdict gates and the resume-routing hexagon.
+//      verdict gates and the (now deterministic) resume-routing gate.
 //
 // Subgraph placement: the six mode-graphs and their five skill-subgraphs are
 // duplicated here under subgraphs/ and subgraphs/subgraphs/ respectively,
@@ -58,7 +71,7 @@
 //                        .resolve/ state and doc writes are anchored here)
 //
 // Context outputs:
-//   cycle.finish_action - "merge" | "pr" | "keep" | "discard"
+//   cycle.finish_action - "pr" (always -- merge/keep/discard removed, see finish.dot's header)
 
 digraph kenergy_full_cycle {
   graph [
@@ -157,27 +170,29 @@ digraph kenergy_full_cycle {
   Debug [
     shape=folder, label="/debug (shared recovery)",
     dot_file="subgraphs/debug.dot",
-    outputs="debug.root_cause,debug.fix_commit_sha"
+    outputs="debug.root_cause,debug.fix_commit_sha,debug.resume_route"
   ];
 
-  // Genuine human judgment call -- debug.md's own Dynamic Transitions
-  // section leaves "where do we resume" to the human, not a file-state gate.
-  ResumeRoute [
-    shape=hexagon, mode="multiple_choice", options="continue_build,replan,redesign",
-    label="Resume Where? (after debug)",
-    prompt="Root cause: ${debug.root_cause}. Fix: ${debug.fix_commit_sha}. Where should the cycle resume: continue_build (the blocked task, same plan), replan (the plan itself needs revision), or redesign (the design needs rethinking)?"
+  // Zero human checkpoints (2026-08-11 revision): debug.dot's own final
+  // Report node now names the resume point as part of its terminal output
+  // (continue_build/replan/redesign), reasoned from the root cause and fix
+  // it already investigated -- it is in the best position to know whether
+  // the fix was local, the plan needs revision, or the design was wrong.
+  // This deterministic gate just reads that call instead of asking a human.
+  // Defaults to continue_build (the least disruptive option) if debug's
+  // report is ambiguous or the field is missing, rather than failing loud --
+  // an ambiguous resume signal should not block a run that otherwise has a
+  // confirmed fix commit.
+  CheckResumeRoute [
+    shape=parallelogram, label="Resume Where? (after debug, deterministic)",
+    tool_command="#!/bin/sh\nset -e\nroute=\"${debug.resume_route}\"\ncase \"$route\" in\n  continue_build|replan|redesign) printf '%s' \"$route\" ;;\n  *) printf 'continue_build' ;;\nesac"
   ];
 
-  // /verify is recommended but not mandatory -- kenergy-reference.md: "An
-  // interactive human may transition directly from /build-like-ken to
-  // /finish, but /verify remains the recommended separate evidence-gathering
-  // step." Default is to run it; explicit human choice can skip.
-  RecommendVerify [
-    shape=hexagon, mode="multiple_choice", options="run_verify,skip_to_finish",
-    label="Run /verify?",
-    prompt="All tasks accepted (${build.tasks_completed} completed). /verify gathers fresh, independently-interpreted completion evidence before /finish -- recommended for anything non-trivial. Run it, or skip straight to /finish?"
-  ];
-
+  // /verify always runs now -- it was already documented as the
+  // recommended default (kenergy-reference.md: "/verify remains the
+  // recommended separate evidence-gathering step"); removing the
+  // skip-to-finish choice just makes the recommendation the only path
+  // rather than pausing to ask which one to take.
   Verify [
     shape=folder, label="/verify",
     dot_file="subgraphs/verify.dot",
@@ -200,7 +215,7 @@ digraph kenergy_full_cycle {
   Report [
     shape=box, fidelity="summary:high",
     label="Report Full Cycle",
-    prompt="Summarize the complete cycle: design ($design_doc), plan ($plan_path), build (${build.tasks_completed} tasks, verdict ${build.verdict}), verify (${verify.verdict}, if run), finish (${finish.action}). "
+    prompt="Summarize the complete cycle: design ($design_doc), plan ($plan_path), build (${build.tasks_completed} tasks, verdict ${build.verdict}), verify (${verify.verdict}), finish (PR opened: ${finish.pr_url} -- awaiting human review, no auto-merge occurred). "
   ];
 
   Start                -> ThinkLikeKen;
@@ -210,7 +225,7 @@ digraph kenergy_full_cycle {
   RenamePlanDocForBuild -> BuildLikeKen;
   BuildLikeKen          -> CheckBuildVerdict;
 
-  CheckBuildVerdict     -> RecommendVerify [condition="context.build.verdict=all_tasks_complete", weight="2"];
+  CheckBuildVerdict     -> Verify [condition="context.build.verdict=all_tasks_complete", weight="2"];
   CheckBuildVerdict     -> RenameBugDescriptionForBuildBlocked [condition="context.build.verdict=blocked"];
   RenameBugDescriptionForBuildBlocked -> Debug;
 
@@ -219,13 +234,10 @@ digraph kenergy_full_cycle {
   // ${design.design_doc} are still the only names these dotted values exist
   // under in context; a direct loop-back edge would skip the bridge and
   // leave $plan_path/$design_doc stale or empty on the resumed run.
-  Debug                 -> ResumeRoute;
-  ResumeRoute           -> RenamePlanDocForBuild [condition="context.tool.last_line=continue_build", loop_restart="true", weight="2"];
-  ResumeRoute           -> RenameDesignDocForPlan [condition="context.tool.last_line=replan", loop_restart="true"];
-  ResumeRoute           -> ThinkLikeKen    [condition="context.tool.last_line=redesign", loop_restart="true"];
-
-  RecommendVerify       -> Verify          [condition="context.tool.last_line=run_verify", weight="2"];
-  RecommendVerify       -> Finish          [condition="context.tool.last_line=skip_to_finish"];
+  Debug                 -> CheckResumeRoute;
+  CheckResumeRoute      -> RenamePlanDocForBuild [condition="context.tool.last_line=continue_build", loop_restart="true", weight="2"];
+  CheckResumeRoute      -> RenameDesignDocForPlan [condition="context.tool.last_line=replan", loop_restart="true"];
+  CheckResumeRoute      -> ThinkLikeKen    [condition="context.tool.last_line=redesign", loop_restart="true"];
 
   Verify                -> CheckVerifyVerdict;
   CheckVerifyVerdict    -> Finish          [condition="context.verify.verdict=verified", weight="2"];

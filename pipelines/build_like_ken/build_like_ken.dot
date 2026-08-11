@@ -125,12 +125,16 @@ digraph build_like_ken {
     tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\nd = json.load(open('${execution_root}/.resolve/build/preflight.json'))\nif d['status'] == 'conflicts':\n    lines = [f\\\"- [tasks {c['tasks']}] {c['question']}\\\" for c in d['conflicts']]\n    print(json.dumps({'route': 'conflicts', 'conflict_questions': chr(10).join(lines)}))\nelse:\n    print(json.dumps({'route': 'clear'}))\n\""
   ];
 
-  // Batched, not one-question-per-conflict -- matches think-like-ken's own
-  // "batch questions by topic" discipline, applied here to plan conflicts.
-  PlanConflictEscalation [
-    shape=hexagon, mode="freeform",
-    label="Plan Conflict Escalation (batched)",
-    prompt="The plan has genuine internal contradictions that only you can resolve. All questions are batched below; answer them together, then this pipeline will exit so the plan can be revised through /plan-like-ken before re-running.\n\n$conflict_questions"
+  // Zero human checkpoints (2026-08-11 revision): a prior version paused on
+  // a human hexagon for genuine plan contradictions. Now the model resolves
+  // them itself -- picks the most defensible resolution per conflict using
+  // evidence and the plan's own stated Global Constraints, records its
+  // reasoning plainly, and the pipeline continues. Batched, not
+  // one-question-per-conflict, matching think-like-ken's own discipline.
+  AutoResolvePlanConflicts [
+    shape=box, fidelity="full",
+    label="Auto-Resolve Plan Conflicts (batched)",
+    prompt="The plan has internal contradictions that need resolving before execution can proceed. There is no human checkpoint here -- resolve each one yourself using evidence, the plan's own Global Constraints, and engineering judgment. Do not guess randomly; pick the most defensible resolution and state why. Update $plan_path directly to reflect each resolution. Write $execution_root/.resolve/build/conflict_resolutions.json with {\"resolutions\":[{\"tasks\":[...],\"question\":\"...\",\"resolution\":\"...\",\"reasoning\":\"...\"}]}.\n\n$conflict_questions"
   ];
 
   // --- Task selection (deterministic; never guesses from conversation memory) ---
@@ -347,8 +351,8 @@ digraph build_like_ken {
   // directly into flat context, so context.route is the correct comparison
   // target.
   PreflightGate             -> NextTask               [condition="context.route=clear", weight="2"];
-  PreflightGate             -> PlanConflictEscalation [condition="context.route=conflicts"];
-  PlanConflictEscalation    -> Exit                   [label="revise plan via /plan-like-ken, then re-run"];
+  PreflightGate             -> AutoResolvePlanConflicts [condition="context.route=conflicts"];
+  AutoResolvePlanConflicts  -> NextTask                [label="conflicts resolved, proceed with the (now-updated) plan"];
 
   NextTask                  -> DefineTaskCriteria     [condition="context.route=has_task", weight="2"];
   NextTask                  -> ComputeBuildVerdictComplete [condition="context.route=no_tasks"];

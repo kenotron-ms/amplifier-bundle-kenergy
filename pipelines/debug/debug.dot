@@ -118,23 +118,50 @@ digraph debug {
   ];
 
   // Bounded escalation: 3+ failures = architectural problem, not a fourth
-  // silent retry. Lands on a human hexagon, matching the mode's explicit
-  // "Discuss with the user before attempting more fixes."
+  // silent retry. Zero human checkpoints (2026-08-11 revision): a prior
+  // version landed on a human hexagon here. Now the pipeline honestly
+  // stops -- no fourth patch attempt, no guessed redesign -- and reports
+  // the architectural signal plainly in the final report so a human can
+  // decide what to do with it later, without the run itself pausing to ask.
   CheckAttemptCount [
     shape=parallelogram, label="Attempt Count",
     tool_command="#!/bin/sh\nset -e\ncount=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/debug/fix_attempt.json'))['attempt_number'])\")\nif [ \"$count\" -lt 3 ]; then printf 'retry'; else printf 'escalate'; fi"
   ];
 
+  // Writes debug.resume_route directly (parse_json="true") -- this pattern's
+  // caller (kenergy_full_cycle.dot's CheckResumeRoute) needs a deterministic
+  // signal for where to resume, since there is no human checkpoint here to
+  // ask. Architectural escalation always implies redesign -- 3+ failed
+  // patches at the code level means the design itself is suspect, not the
+  // plan or the implementation.
   ArchitectureEscalation [
-    shape=hexagon, mode="freeform",
-    label="Question Architecture (3+ fails)",
-    prompt="This bug has resisted 3 fix attempts. That is an architectural signal, not bad luck. Is this pattern fundamentally sound, or should we refactor the architecture instead of continuing to patch symptoms? What would you like to do?"
+    shape=box, fidelity="summary:high",
+    label="Report Architectural Blocker (3+ fails, no further patch)",
+    prompt="This bug has resisted 3 fix attempts -- that is an architectural signal, not bad luck. Do NOT attempt a fourth patch. State plainly: the bug is not resolved, root cause investigation across 3 attempts is captured at $execution_root/.resolve/debug/hypothesis.json and $execution_root/.resolve/debug/fix_attempt.json, and this pattern needs architectural reconsideration (via /think-like-ken) rather than further symptom patching. This is a terminal report, not a fix attempt. Write $execution_root/.resolve/debug/resume_route.json with {\"resume_route\":\"redesign\"}."
   ];
 
+  // Writes debug.resume_route directly (parse_json="true") -- decide
+  // continue_build vs replan from the nature of the fix that just landed:
+  // continue_build if the fix was purely code-level (the plan's task
+  // breakdown still holds), replan if the fix required scope the plan
+  // didn't anticipate (a new task, a changed interface, a dropped
+  // requirement). Default to continue_build when genuinely unsure -- the
+  // less disruptive resume point, and wrong-but-harmless if it turns out
+  // more revision was needed (the next build cycle's own preflight/review
+  // gates will catch a plan that's actually stale).
   Report [
     shape=box, fidelity="summary:high",
     label="Report",
-    prompt="Bug fixed and independently verified. Root cause: $(cat $execution_root/.resolve/debug/hypothesis.json). Fix commit: $(cat $execution_root/.resolve/debug/fix_attempt.json). "
+    prompt="Bug fixed and independently verified. Root cause: $(cat $execution_root/.resolve/debug/hypothesis.json). Fix commit: $(cat $execution_root/.resolve/debug/fix_attempt.json). Decide where the calling pipeline should resume: continue_build (the fix was code-level, the plan's task breakdown still holds) or replan (the fix required scope the plan didn't anticipate -- a new task, a changed interface, a dropped requirement). Default to continue_build if genuinely unsure. Write $execution_root/.resolve/debug/resume_route.json with {\"resume_route\":\"continue_build\"|\"replan\"}. "
+  ];
+
+  // Deterministic bridge: promotes resume_route.json's content into the
+  // flat debug.resume_route context key this graph's own header documents
+  // as an output (same missing-writer class of fix as think_like_ken.dot's
+  // EmitDesignDocOutput / verify.dot's OverallGate).
+  EmitResumeRouteOutput [
+    shape=parallelogram, parse_json="true", label="Emit debug.resume_route Output",
+    tool_command="#!/bin/sh\nset -e\nroute=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/debug/resume_route.json'))['resume_route'])\")\npython3 -c \"import json;print(json.dumps({'debug.resume_route': '$route'}))\""
   ];
 
   Start                    -> ReproduceAndInvestigate;
@@ -154,7 +181,8 @@ digraph debug {
 
   CheckAttemptCount        -> ReproduceAndInvestigate [condition="context.tool.last_line=retry", loop_restart="true", label="return to Phase 1 with new information"];
   CheckAttemptCount        -> ArchitectureEscalation  [condition="context.tool.last_line=escalate"];
-  ArchitectureEscalation   -> Exit                    [label="architecture decision made with the user -- likely routes to /think-like-ken"];
+  ArchitectureEscalation   -> EmitResumeRouteOutput    [label="terminal report -- no further patch; resume_route=redesign"];
 
-  Report                   -> Exit;
+  Report                   -> EmitResumeRouteOutput;
+  EmitResumeRouteOutput    -> Exit;
 }

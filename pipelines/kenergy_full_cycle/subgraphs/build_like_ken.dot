@@ -48,6 +48,15 @@
 // Context inputs:
 //   $plan_path        - absolute path to the implementation plan
 //   $execution_root    - worktree/repo root all tasks execute inside
+//   $kenergy_ref       - (optional) git ref of amplifier-bundle-kenergy to
+//                        bootstrap scripts/ from; defaults to "main". Needed
+//                        because this graph's tool_command nodes shell out to
+//                        scripts/*.py, which do not travel with a remotely
+//                        fetched .dot file (materialize_remote_dot only
+//                        fetches dot_file= targets) and are not guaranteed to
+//                        be present on a tool node's CWD in every execution
+//                        environment (e.g. a Resolve worker's CWD is the
+//                        *target* workspace repo, not this repo).
 //
 // Context outputs:
 //   build.verdict           - "all_tasks_complete" | "blocked"
@@ -116,12 +125,16 @@ digraph build_like_ken {
     tool_command="#!/bin/sh\nset -e\npython3 -c \"\nimport json\nd = json.load(open('${execution_root}/.resolve/build/preflight.json'))\nif d['status'] == 'conflicts':\n    lines = [f\\\"- [tasks {c['tasks']}] {c['question']}\\\" for c in d['conflicts']]\n    print(json.dumps({'route': 'conflicts', 'conflict_questions': chr(10).join(lines)}))\nelse:\n    print(json.dumps({'route': 'clear'}))\n\""
   ];
 
-  // Batched, not one-question-per-conflict -- matches think-like-ken's own
-  // "batch questions by topic" discipline, applied here to plan conflicts.
-  PlanConflictEscalation [
-    shape=hexagon, mode="freeform",
-    label="Plan Conflict Escalation (batched)",
-    prompt="The plan has genuine internal contradictions that only you can resolve -- see ${execution_root}/.resolve/build/preflight.json for the full list. All questions are batched below; answer them together, then this pipeline will exit so the plan can be revised through /plan-like-ken before re-running.\n\n${tool.last_output}"
+  // Zero human checkpoints (2026-08-11 revision): a prior version paused on
+  // a human hexagon for genuine plan contradictions. Now the model resolves
+  // them itself -- picks the most defensible resolution per conflict using
+  // evidence and the plan's own stated Global Constraints, records its
+  // reasoning plainly, and the pipeline continues. Batched, not
+  // one-question-per-conflict, matching think-like-ken's own discipline.
+  AutoResolvePlanConflicts [
+    shape=box, fidelity="full",
+    label="Auto-Resolve Plan Conflicts (batched)",
+    prompt="The plan has internal contradictions that need resolving before execution can proceed. There is no human checkpoint here -- resolve each one yourself using evidence, the plan's own Global Constraints, and engineering judgment. Do not guess randomly; pick the most defensible resolution and state why. Update $plan_path directly to reflect each resolution. Write $execution_root/.resolve/build/conflict_resolutions.json with {\"resolutions\":[{\"tasks\":[...],\"question\":\"...\",\"resolution\":\"...\",\"reasoning\":\"...\"}]}.\n\n$conflict_questions"
   ];
 
   // --- Task selection (deterministic; never guesses from conversation memory) ---
@@ -174,9 +187,18 @@ digraph build_like_ken {
   // ConfirmVerdictAgainstRepo's downstream commit-sha check, applied one
   // step earlier so a malformed/missing artifact never even reaches
   // RouteVerificationLevel.
-  ImplementArtifactGate [
-    shape=parallelogram, goal_gate=true, retry_target="Implement", label="Implement Artifact Well-Formed?",
-    tool_command="#!/bin/sh\nset -e\nf=\"${execution_root}/.resolve/build/impl_${task_id}.json\"\nstatus=$(python3 -c \"import json;print(json.load(open('$f')).get('status',''))\" 2>/dev/null || echo '')\nsha=$(python3 -c \"import json;print(json.load(open('$f')).get('commit_sha',''))\" 2>/dev/null || echo '')\ncase \"$status\" in\n  DONE|DONE_WITH_CONCERNS)\n    if [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then printf 'ok'; else printf 'missing'; fi\n    ;;\n  NEEDS_CONTEXT|BLOCKED)\n    printf 'ok'\n    ;;\n  *)\n    printf 'missing'\n    ;;\nesac"
+  //
+  // Renamed from ImplementArtifactGate: the previous case statement
+  // collapsed four semantically distinct implementer outcomes (DONE,
+  // DONE_WITH_CONCERNS, NEEDS_CONTEXT, BLOCKED) into a binary ok/missing
+  // artifact check, silently routing NEEDS_CONTEXT and BLOCKED down the
+  // identical "ok" path into RouteVerificationLevel/review as a normal DONE.
+  // Now exposed as three distinct DOT edges (done/needs_context/blocked)
+  // so the real business-meaningful distinction is visible in the graph,
+  // not discarded inside the shell.
+  ImplementOutcomeGate [
+    shape=parallelogram, goal_gate=true, retry_target="Implement", label="Implement Outcome?",
+    tool_command="#!/bin/sh\nset -e\nf=\"${execution_root}/.resolve/build/impl_${task_id}.json\"\nstatus=$(python3 -c \"import json;print(json.load(open('$f')).get('status',''))\" 2>/dev/null || echo '')\nsha=$(python3 -c \"import json;print(json.load(open('$f')).get('commit_sha',''))\" 2>/dev/null || echo '')\ncase \"$status\" in\n  DONE|DONE_WITH_CONCERNS)\n    if [ -n \"$sha\" ] && git -C \"${execution_root}\" cat-file -e \"$sha\" 2>/dev/null; then printf 'ok'; else printf 'missing'; fi\n    ;;\n  NEEDS_CONTEXT)\n    printf 'needs_context'\n    ;;\n  BLOCKED)\n    printf 'blocked'\n    ;;\n  *)\n    printf 'missing'\n    ;;\nesac"
   ];
 
   // --- Verification-level router: reads the FILE the implementer just wrote
@@ -329,8 +351,8 @@ digraph build_like_ken {
   // directly into flat context, so context.route is the correct comparison
   // target.
   PreflightGate             -> NextTask               [condition="context.route=clear", weight="2"];
-  PreflightGate             -> PlanConflictEscalation [condition="context.route=conflicts"];
-  PlanConflictEscalation    -> Exit                   [label="revise plan via /plan-like-ken, then re-run"];
+  PreflightGate             -> AutoResolvePlanConflicts [condition="context.route=conflicts"];
+  AutoResolvePlanConflicts  -> NextTask                [label="conflicts resolved, proceed with the (now-updated) plan"];
 
   NextTask                  -> DefineTaskCriteria     [condition="context.route=has_task", weight="2"];
   NextTask                  -> ComputeBuildVerdictComplete [condition="context.route=no_tasks"];
@@ -338,9 +360,11 @@ digraph build_like_ken {
 
   DefineTaskCriteria        -> SaveTaskState;
   SaveTaskState             -> Implement;
-  Implement                 -> ImplementArtifactGate;
-  ImplementArtifactGate      -> RouteVerificationLevel [condition="context.tool.last_line=ok", weight="2"];
-  ImplementArtifactGate      -> Implement               [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact missing/malformed or commit_sha does not resolve, bounded by default_max_retry=2"];
+  Implement                 -> ImplementOutcomeGate;
+  ImplementOutcomeGate       -> RouteVerificationLevel [condition="context.tool.last_line=ok", weight="2"];
+  ImplementOutcomeGate       -> Implement               [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact missing/malformed or commit_sha does not resolve, bounded by default_max_retry=2"];
+  ImplementOutcomeGate       -> Implement               [condition="context.tool.last_line=needs_context", loop_restart="true", label="re-implement -- implementer reported NEEDS_CONTEXT, distinct from a malformed artifact"];
+  ImplementOutcomeGate       -> ComputeBuildVerdictBlocked [condition="context.tool.last_line=blocked", label="BLOCKED: skip review entirely, straight to ledger-blocked path"];
   RouteVerificationLevel    -> ScenarioVerificationGate  [condition="context.tool.last_line=browser"];
   RouteVerificationLevel    -> IntegrationTestingGate    [condition="context.tool.last_line=dtu"];
   RouteVerificationLevel    -> BuildReviewPackage        [condition="context.tool.last_line=static", weight="2"];
