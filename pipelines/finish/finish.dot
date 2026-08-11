@@ -91,19 +91,45 @@ digraph finish {
     tool_command="#!/bin/sh\nset -e\npython3 ${kenergy_root}/scripts/capture_entry_paths.py --worktree \"${WORKTREE_PATH:-$(pwd)}\""
   ];
 
-  ExecutePR [
+  // Drafting a good PR title/body IS real judgment (summarizing what
+  // changed, why) -- that stays an LLM box node. Everything mechanical
+  // downstream (push, API call, confirmation) is deterministic -- no LLM in
+  // the loop for the actual git/gh actions, matching the canonical
+  // deliver_pr.dot subgraph pattern (amplifier-resolver-dot-graph) this was
+  // modeled on: "code-only, all-parallelogram, deterministic" for the
+  // delivery mechanics themselves.
+  DraftPRDescription [
     shape=box, fidelity="full",
-    label="Execute Open PR",
-    prompt="cd ${entry_paths.main_repo_path}. Push ${entry_paths.branch_name} and open a PR via gh pr create. Write $execution_root/.resolve/finish/pr_attempt.json with {\"attempted_url\":\"...\"}. "
+    label="Draft PR Title + Body",
+    prompt="cd ${entry_paths.main_repo_path}. Review the commits on ${entry_paths.branch_name} since it diverged from its base branch. Write $execution_root/.resolve/finish/pr_description.json with {\"title\":\"...\",\"body\":\"...\"} -- a concise, accurate title and a body summarizing what changed and why, suitable for a real PR description."
+  ];
+
+  DraftArtifactGate [
+    shape=parallelogram, goal_gate=true, retry_target="DraftPRDescription", label="PR Description Written?",
+    tool_command="#!/bin/sh\nset -e\np=\"${execution_root}/.resolve/finish/pr_description.json\"\nif [ -s \"$p\" ]; then printf 'ok'; else printf 'missing'; fi"
+  ];
+
+  // Deterministic (no LLM): push the branch, then open the PR via `gh api`
+  // directly against the real GitHub REST API rather than `gh pr create` --
+  // this is the GitHub-flavored equivalent of deliver_pr.dot's own CreatePR
+  // node, which calls the Gitea REST API directly and parses the real JSON
+  // response for html_url instead of relying on an LLM-driven CLI call plus
+  // scraping printed stdout. Same fix, GitHub API instead of Gitea's.
+  ExecutePR [
+    shape=parallelogram, parse_json="true", label="Push Branch + Open PR (gh api)",
+    tool_command="#!/bin/sh\nset -e\ncd \"${entry_paths.main_repo_path}\"\ngit push -u origin \"${entry_paths.branch_name}\" >&2\ntitle=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/pr_description.json'))['title'])\")\nbody=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/pr_description.json'))['body'])\")\nbase=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)\nresp=$(gh api repos/{owner}/{repo}/pulls -f title=\"$title\" -f body=\"$body\" -f head=\"${entry_paths.branch_name}\" -f base=\"$base\" 2>&1) || resp='{}'\nurl=$(printf '%s' \"$resp\" | python3 -c \"import json,sys\\ntry:\\n  print(json.load(sys.stdin).get('html_url',''))\\nexcept Exception:\\n  print('')\")\nnum=$(printf '%s' \"$resp\" | python3 -c \"import json,sys\\ntry:\\n  print(json.load(sys.stdin).get('number',''))\\nexcept Exception:\\n  print('')\")\npython3 -c \"import json;print(json.dumps({'attempted_url': '$url', 'attempted_number': '$num'}))\""
   ];
 
   // Faithful to this repo's own deliver_pr.dot CheckPROpened case study
   // (docs/RUBRIC.md §2): never trust a printed URL as proof a PR exists.
+  // Re-verifies via a SEPARATE `gh api` call against the real PR number
+  // (not re-parsing ExecutePR's own claimed response) -- the same
+  // create-then-independently-recheck discipline deliver_pr.dot uses.
   // Writes finish.action / finish.pr_url directly (parse_json="true") -- see
   // ConfirmMergeLanded's note above for the same fix on the merge path.
   ConfirmPROpened [
     shape=parallelogram, goal_gate=true, retry_target="ExecutePR", label="Confirm PR Opened", parse_json="true",
-    tool_command="#!/bin/sh\nset -e\nurl=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/pr_attempt.json'))['attempted_url'])\")\nif gh pr view \"$url\" >/dev/null 2>&1; then\n  printf '{\"route\":\"pr_confirmed\",\"finish.action\":\"pr\",\"finish.pr_url\":\"%s\"}' \"$url\"\nelse\n  printf '{\"route\":\"pr_unconfirmed\"}'\nfi"
+    tool_command="#!/bin/sh\nset -e\nurl=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/pr_attempt.json'))['attempted_url'])\")\nnum=$(python3 -c \"import json;print(json.load(open('${execution_root}/.resolve/finish/pr_attempt.json'))['attempted_number'])\")\nif [ -n \"$num\" ] && gh api \"repos/{owner}/{repo}/pulls/$num\" --jq .state >/dev/null 2>&1; then\n  printf '{\"route\":\"pr_confirmed\",\"finish.action\":\"pr\",\"finish.pr_url\":\"%s\"}' \"$url\"\nelse\n  printf '{\"route\":\"pr_unconfirmed\"}'\nfi"
   ];
 
   // Scope boundary (intentional): this graph stops at a PR-opened,
@@ -120,7 +146,10 @@ digraph finish {
 
   Start                     -> Bootstrap;
   Bootstrap                 -> CaptureEntryPaths;
-  CaptureEntryPaths          -> ExecutePR;
+  CaptureEntryPaths          -> DraftPRDescription;
+  DraftPRDescription          -> DraftArtifactGate;
+  DraftArtifactGate            -> ExecutePR         [condition="context.tool.last_line=ok", weight="2"];
+  DraftArtifactGate            -> DraftPRDescription [condition="context.tool.last_line=missing", loop_restart="true", label="retry -- artifact not written, bounded by default_max_retry=2"];
 
   ExecutePR                             -> ConfirmPROpened;
   ConfirmPROpened                        -> Report [condition="context.route=pr_confirmed", weight="2"];
