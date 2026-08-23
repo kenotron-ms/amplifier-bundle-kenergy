@@ -21,6 +21,13 @@ questions directly. Present one consolidated TL;DR review for explicit approval,
 then delegate document creation to `kenergy:design-writer` — the orchestrator
 converses, the agent writes the artifact.
 
+**Standalone `/design-like-ken`** — Write one concise design brief and stop.
+
+Perform one bounded local evidence pass, ask zero questions when responsible or one
+batch of up to three user-owned questions when necessary, then delegate exactly one
+uncommitted file under `docs/designs/`. It mechanically checks the artifact, clears
+the mode, and does not continue into planning or implementation.
+
 **`/plan-like-ken`** — Direct planning from the approved design.
 
 Reads the approved design, maps dependencies, and decides the exact verification method for every task (not "write a test" — decide whether that means `curl`, `playwright-cli`, or `python -c`). Delegates plan creation directly to `kenergy:plan-writer`, then hands the saved plan automatically to continuous execution.

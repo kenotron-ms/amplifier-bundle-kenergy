@@ -28,6 +28,13 @@ Opinionated development workflow for people who believe that:
 | `/build-like-ken` | Implementer → three-axis `kenergy:reviewer` → bounded fix loop |
 | `/finish` | Merge / PR / keep / discard decision |
 
+### Standalone `/design-like-ken`
+
+Use `/design-like-ken <brief>` for one bounded evidence pass, zero questions or one
+batch of up to three user-owned questions, and exactly one uncommitted design brief under
+`docs/designs/`. The mode mechanically validates the brief, clears itself, and stops before
+planning or implementation.
+
 **Five persona reviewer skills** you can load at any checkpoint:
 
 | Skill | Persona | Load trigger |

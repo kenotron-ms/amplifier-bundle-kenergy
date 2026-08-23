@@ -40,6 +40,10 @@ the automated counterpart to the completion evidence gathered interactively by
 
 At any point, if a bug needs root-cause investigation: `/debug`.
 
+**Standalone design-only command:** `/design-like-ken` produces one bounded design brief and
+stops. It is not a fifth phase of either completion path and does not transition into planning
+or implementation.
+
 **Priority order when multiple modes could apply:**
 1. Process modes first (`/think-like-ken`, `/debug`) — determine how to approach the task.
 2. Implementation modes second (`/plan-like-ken`, `/build-like-ken`) — prepare and execute the plan.
@@ -70,6 +74,7 @@ useful when an agent needs to request a transition during automated workflows.
 | Mode | Shortcut | Purpose | Who Does the Work |
 |------|----------|---------|-------------------|
 | Think Like Ken | `/think-like-ken` | Design refinement through collaborative dialogue | You (main agent) |
+| Design Like Ken | `/design-like-ken` | One bounded, evidence-backed design brief that stops before planning | You judge; a mode-scoped writer creates the sole artifact |
 | Plan Like Ken | `/plan-like-ken` | Create a detailed VDD implementation plan | You (main agent) |
 | Build Like Ken | `/build-like-ken` | Continuous plan execution through a uniform reviewer lifecycle | Subagents; you orchestrate |
 | Debug | `/debug` | Four-phase systematic debugging | You investigate; a subagent fixes |
@@ -81,6 +86,7 @@ useful when an agent needs to request a transition during automated workflows.
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|
 | `kenergy:design-writer` | Writes the approved design document | After the think-like-ken conversation |
+| `design-brief-writer` | Writes the single settled design-only brief | Only while `/design-like-ken` is active; mode-scoped, not globally registered |
 | `kenergy:plan-writer` | Creates and parses detailed VDD plans; performs plan-level pre-flight work | During planning and before continuous execution |
 | `kenergy:implementer` | Implements one task with static analysis, real verification, exact output, and an atomic commit | Every task and each fresh escalation in `/build-like-ken` |
 | `kenergy:reviewer` | Reviews one completed task on three axes: goal/spec compliance, quality, and verification adequacy | Mandatory after each implementation or fix; receives `TASK GOAL` and `REVIEW PACKAGE` |
@@ -121,6 +127,14 @@ useful when an agent needs to request a transition during automated workflows.
   actual task bar.
 - The plan-scoped ledger, not conversation history, makes interruption and
   resumption safe.
+
+## Design-Only Means Stop
+
+`/design-like-ken` makes one bounded evidence pass, then asks zero questions when
+responsible or one batch of at most three user-owned questions. It asks no additional
+batch without an explicit grant, never solicits that grant, and decides engineering choices
+directly. The command creates one uncommitted `docs/designs/` artifact, mechanically checks
+it, clears the mode, and never transitions into planning or build work.
 
 ## Reference: VDD vs TDD
 
