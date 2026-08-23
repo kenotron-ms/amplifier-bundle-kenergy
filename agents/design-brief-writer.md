@@ -16,7 +16,8 @@ Write one concise, settled design document from the delegation input for the act
 ## File Boundary
 
 - Use only the exact supplied `docs/designs/YYYY-MM-DD-<topic>-design.md` path.
-- Create exactly that file; edit no existing file and create nothing else.
+- Create or replace only that exact target file; edit no other existing file and create
+  nothing else.
 - Leave the work uncommitted. Do not create a branch, commit, or PR.
 - Do not create a plan, tasks, implementation work, code, or any second artifact.
 - Ask no questions, explore no repository, conduct no design review, and invent no

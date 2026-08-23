@@ -26,13 +26,6 @@ mode:
 
 DESIGN-LIKE-KEN MODE: Produce one bounded, evidence-backed design document and stop.
 
-<MANDATORY FIRST-REPLY RULE>
-If the brief says that a user-owned preference is unspecified and must not be inferred,
-ask the formatted initial question batch before any design creation. For the internal
-feedback-collection brief with unspecified audience, anonymity, and retention, the first
-assistant response MUST ask Q1, Q2, and Q3 for those three facts and nothing else.
-</MANDATORY FIRST-REPLY RULE>
-
 ## Ownership Boundary
 
 - Own the conversation and engineering judgment in the root session.
@@ -70,22 +63,17 @@ Only ask for facts that only the user knows or genuine personal/business prefere
 only when different answers materially change the design.
 
 <HARD-GATE>
-Treat a user statement that a business preference or user-owned fact is unspecified and
-must not be inferred as a mandatory question trigger. Do not convert it into an assumption,
-risk, or engineering decision before consuming the initial batch. When one or more such
-facts exist, the first assistant response after the bounded evidence pass MUST be the
-formatted batch, covering every known material fact up to the three-question limit. Do not
-create or delegate the design until the user answers that batch.
-
-For an internal feedback collection brief whose target audience, submission anonymity, and
-retention period are explicitly unspecified, ask all three as Q1, Q2, and Q3 in that one
-batch. Do not write the design before the answers arrive.
+Treat any material user-owned fact or personal/business preference that is explicitly
+unresolved and must not be inferred as a mandatory question trigger. Do not convert it into
+an assumption, risk, or engineering decision before consuming the initial batch. If the
+brief enumerates multiple such facts, ask each one in the same formatted batch, up to the
+three-question limit. Do not create or delegate the design until the user answers that batch.
 </HARD-GATE>
 
 Format every question exactly as follows:
 
 ```text
-**Q1 — <clear question>**
+**Q<n> — <clear question>**
 Why it matters: <one sentence describing the design change>
 Recommended default: <the best default and why>
 Ranked options:
@@ -93,12 +81,13 @@ Ranked options:
 2. <next option> — <concise trade-off>
 ```
 
-Add a third ranked option only when it is useful. Use conversation history as the budget
-ledger. The initial budget permits one batch. After using it, ask no more questions unless
-the user explicitly grants another batch. Never ask for, suggest, or solicit that grant.
-Each explicit grant permits at most one additional batch of one to three questions and is
-consumed once. Without a grant, choose the recommended default, record the assumption or
-risk, and continue.
+Replace `<n>` with sequential labels starting at `Q1`: use `Q1`, then `Q2`, then `Q3`
+without duplicates or gaps. Add a third ranked option only when it is useful. Use
+conversation history as the budget ledger. The initial budget permits one batch. After
+using it, ask no more questions unless the user explicitly grants another batch. Never ask
+for, suggest, or solicit that grant. Each explicit grant permits at most one additional
+batch of one to three questions and is consumed once. Without a grant, choose the
+recommended default, record the assumption or risk, and continue.
 
 ## Create the Design Brief
 
@@ -111,9 +100,9 @@ docs/designs/YYYY-MM-DD-<topic>-design.md
 Initially delegate exactly once to `design-brief-writer`. Pass the exact target path, the
 desired outcome, settled user facts, relevant evidence and constraints, direct engineering
 decisions, ranked alternatives, components, interfaces, risks, and shared seams. Include the
-literal required table header rows below in that delegation. Tell the writer it may create only
-that target file and may not commit, ask questions, create or update todos, or add
-implementation work.
+literal required table header rows below in that delegation. Tell the writer it may
+create or replace only that target file and may not commit, ask questions, create or update
+todos, or add implementation work.
 
 Require a compact 600–1,000 word document with exactly these `##` headings, in this order:
 
@@ -159,11 +148,19 @@ After delegation, read the target and check all of the following mechanically:
   | ID | Assumption or risk | Consequence if false | Containment |
   | ID | Shared surface | Owning component | Consumers | Collision rule |
   ```
-- Grep headings for forbidden material: implementation tasks or steps, task breakdown,
-  lane assignments, sequencing, estimates, code scaffolds, model assignments, next steps,
-  open questions, and unresolved questions.
-- Reject fenced code blocks, pseudocode, command invocations, or concrete source scaffolding
-  in the document body.
+- Run one bounded, case-insensitive scan over the entire document body. Exclude only the
+  exact ten required heading lines and five required table-header lines from phrase
+  matching, so the required structure and ordinary descriptive prose in those sections do
+  not fail by themselves. Fail the scan on any of these explicit prohibited patterns:
+  - implementation tasks or steps; work/task breakdowns or checklists;
+  - lane assignments; lane/work/task/implementation sequencing; lane/work/task/
+    implementation phases or numbered `Phase N` labels;
+  - estimates, code scaffolds, pseudocode, model assignments, or provider assignments;
+  - next steps, open questions, or unresolved questions;
+  - a suggestion, recommendation, or directive to plan, build, review, commit, or open a
+    PR/pull request.
+- Reject fenced code blocks, command invocations, or concrete source scaffolding anywhere
+  in the entire document body.
 - The writer response contains only the exact target path. Treat that response as its
   declaration that it created no second artifact and made no commit.
 
