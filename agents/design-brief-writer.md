@@ -31,8 +31,12 @@ successful write.
 
 ## Required Document Shape
 
-Write 600–1,000 words. Use compact tables and stable IDs. Use exactly these `##`
-headings, in this order, with no additional `##` headings:
+Write a concise, decision-dense document. Detail scales with the actual complexity of the design.
+Include every decision, boundary, interface, failure mode, verification outcome, risk, and
+shared seam needed to make the design unambiguous and actionable. Remove repetition and prose that
+does not change a decision or clarify a boundary. Never omit necessary detail merely to satisfy an
+arbitrary length target. Use compact tables and stable IDs. Use exactly these `##` headings, in
+this order, with no additional `##` headings:
 
 1. Outcome
 2. Scope and Non-goals

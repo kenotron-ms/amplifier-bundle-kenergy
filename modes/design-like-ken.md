@@ -104,7 +104,11 @@ literal required table header rows below in that delegation. Tell the writer it 
 create or replace only that target file and may not commit, ask questions, create or update
 todos, or add implementation work.
 
-Require a compact 600–1,000 word document with exactly these `##` headings, in this order:
+Require a concise, decision-dense document with exactly these `##` headings, in this order.
+Detail scales with the actual complexity of the design. Include every decision, boundary, interface,
+failure mode, verification outcome, risk, and shared seam needed to make the design unambiguous
+and actionable. Remove repetition and prose that does not change a decision or clarify a boundary.
+Never omit necessary detail merely to satisfy an arbitrary length target:
 
 1. Outcome
 2. Scope and Non-goals
@@ -137,7 +141,6 @@ After delegation, read the target and check all of the following mechanically:
 
 - The target exists and is nonempty.
 - It has exactly the ten required `##` headings in the required order.
-- It contains 600–1,000 whitespace-delimited words.
 - It includes the required stable-ID patterns `D-01`, `R-01`, and `S-01`.
 - It includes each of these exact table header rows:
 
